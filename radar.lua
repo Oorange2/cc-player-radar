@@ -47,6 +47,12 @@ local popup           = nil
 local activeNodes     = {}
 local displayRadius   = MIN_RADIUS
 
+-- Zoom state
+local zoomMode     = "auto"   -- "auto" or "manual"
+local manualRadius = MIN_RADIUS
+local ZOOM_FACTOR  = 1.5
+local buttons      = {}       -- populated each draw frame, read by touchLoop
+
 local AUTHORIZED = {
     ["cypu001"]         = true,
     ["SirAlf1808"]      = true,
@@ -167,6 +173,34 @@ local function drawPopup(names)
     end
 end
 
+local function drawButtons()
+    buttons = {}
+    local btnY = H  -- bottom row
+
+    local function btn(label, x, active, action)
+        local bg = active and colors.lime or colors.gray
+        local fg = active and colors.black or colors.white
+        monitor.setBackgroundColor(bg)
+        monitor.setTextColor(fg)
+        monitor.setCursorPos(x, btnY)
+        monitor.write(label)
+        table.insert(buttons, { x = x, y = btnY, w = #label, action = action })
+        return x + #label + 1
+    end
+
+    local x = 1
+    x = btn("[+]",    x, false,              "zoomin")
+    x = btn("[-]",    x, false,              "zoomout")
+        btn("[Auto]", x, zoomMode == "auto", "auto")
+
+    -- Scale readout after buttons
+    local scaleText = "R:" .. math.floor(displayRadius) .. "m"
+    monitor.setBackgroundColor(colors.black)
+    monitor.setTextColor(colors.gray)
+    monitor.setCursorPos(x + 6, btnY)
+    monitor.write(scaleText)
+end
+
 local function calcDisplayRadius()
     if not hasGPS then return MIN_RADIUS end
     local now    = os.clock()
@@ -243,7 +277,11 @@ local function radarLoop()
         if popup and now > popup.expires then popup = nil end
 
         -- Recalculate display radius each frame
-        displayRadius = calcDisplayRadius()
+        if zoomMode == "auto" then
+            displayRadius = calcDisplayRadius()
+        else
+            displayRadius = manualRadius
+        end
 
         -- Draw frame
         monitor.setBackgroundColor(colors.black)
@@ -255,12 +293,7 @@ local function radarLoop()
         drawSweepLine(sweepAngle, colors.lime)
         put(CX, CY, colors.lime, "+")
 
-        -- Scale indicator bottom-left
-        local scaleText = "R:" .. math.floor(displayRadius) .. "m"
-        monitor.setBackgroundColor(colors.black)
-        monitor.setTextColor(colors.gray)
-        monitor.setCursorPos(1, H)
-        monitor.write(scaleText)
+        drawButtons()
 
         -- Group players whose screen positions are within 2 cells of each other
         local groups = {}  -- each: {sx, sy, names, allAuth}
@@ -375,18 +408,39 @@ end
 local function touchLoop()
     while true do
         local _, _, tx, ty = os.pullEvent("monitor_touch")
-        local hit = nil
-        for name, pos in pairs(playerScreenPos) do
-            if math.abs(tx - pos.sx) <= 2 and math.abs(ty - pos.sy) <= 2 then
-                hit = name
+
+        -- Check zoom buttons first
+        local btnHit = false
+        for _, b in ipairs(buttons) do
+            if ty == b.y and tx >= b.x and tx < b.x + b.w then
+                if b.action == "zoomin" then
+                    zoomMode     = "manual"
+                    manualRadius = math.max(50, displayRadius / ZOOM_FACTOR)
+                elseif b.action == "zoomout" then
+                    zoomMode     = "manual"
+                    manualRadius = displayRadius * ZOOM_FACTOR
+                elseif b.action == "auto" then
+                    zoomMode = "auto"
+                end
+                btnHit = true
                 break
             end
         end
-        if hit then
-            local g = playerScreenPos[hit] and playerScreenPos[hit].group
-            popup = { names = g and g.names or { hit }, expires = os.clock() + 5 }
-        else
-            popup = nil
+
+        if not btnHit then
+            local hit = nil
+            for name, pos in pairs(playerScreenPos) do
+                if math.abs(tx - pos.sx) <= 2 and math.abs(ty - pos.sy) <= 2 then
+                    hit = name
+                    break
+                end
+            end
+            if hit then
+                local g = playerScreenPos[hit] and playerScreenPos[hit].group
+                popup = { names = g and g.names or { hit }, expires = os.clock() + 5 }
+            else
+                popup = nil
+            end
         end
     end
 end
