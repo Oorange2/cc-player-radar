@@ -11,6 +11,7 @@ local monitor = peripheral.wrap("left")
 if not monitor then error("No monitor on left") end
 
 local localDetector = peripheral.find("player_detector")
+local printer       = peripheral.wrap("right")
 
 -- Open ender modem
 local modemSide = nil
@@ -78,6 +79,49 @@ local function log(msg)
     local f = fs.open(LOG_FILE, "a")
     f.writeLine("[" .. t .. "] " .. msg)
     f.close()
+end
+
+local printerPageOpen = false
+local printerLine     = 1
+local printerW, printerH = 25, 21
+local lastPrintEvent  = 0
+local PRINT_FLUSH_TIMEOUT = 60  -- close page after 60s of inactivity
+
+local function printerWrite(text)
+    if not printer then return end
+    if printer.getPaperLevel() == 0 or printer.getInkLevel() == 0 then return end
+
+    if not printerPageOpen then
+        if not printer.newPage() then return end
+        printer.setPageTitle("Security Log")
+        printer.setCursorPos(1, 1)
+        printerLine = 1
+        printerPageOpen = true
+    end
+
+    printer.setCursorPos(1, printerLine)
+    printer.write(text:sub(1, printerW))
+    printerLine = printerLine + 1
+    lastPrintEvent = os.clock()
+
+    if printerLine > printerH then
+        printer.endPage()
+        printerPageOpen = false
+    end
+end
+
+local function printerFlush()
+    if printerPageOpen then
+        printer.endPage()
+        printerPageOpen = false
+    end
+end
+
+local function printAlert(event, name, dist)
+    local t    = os.date("%H:%M:%S")
+    local dist_str = dist and string.format(" %.0fm", dist) or ""
+    printerWrite(string.format("[%s] %s", t, event))
+    printerWrite(string.format("  %s%s", name, dist_str))
 end
 
 local function put(x, y, col, char)
@@ -190,6 +234,12 @@ local function radarLoop()
                     if info then
                         if not seenPlayers[name] then
                             log("SPOTTED (local): " .. name)
+                            if not AUTHORIZED[name] then
+                                local dx   = hasGPS and (info.x - baseX) or 0
+                                local dz   = hasGPS and (info.z - baseZ) or 0
+                                local dist = hasGPS and math.sqrt(dx*dx + dz*dz) or nil
+                                printAlert("ENTERED", name, dist)
+                            end
                         end
                         allPlayers[name] = { x = info.x, y = info.y, z = info.z, lastSeen = now }
                     end
@@ -201,8 +251,16 @@ local function radarLoop()
         for name, data in pairs(allPlayers) do
             if now - data.lastSeen > PLAYER_TIMEOUT then
                 log("LEFT: " .. name)
+                if not AUTHORIZED[name] then
+                    printAlert("LEFT", name, nil)
+                end
                 allPlayers[name] = nil
             end
+        end
+
+        -- Flush printer page if idle too long
+        if printerPageOpen and os.clock() - lastPrintEvent > PRINT_FLUSH_TIMEOUT then
+            printerFlush()
         end
 
         -- Rebuild seenPlayers
@@ -326,6 +384,12 @@ local function networkLoop()
             for name, pos in pairs(msg.players) do
                 if not seenPlayers[name] then
                     log("SPOTTED (node " .. msg.nodeId .. "): " .. name)
+                    if not AUTHORIZED[name] then
+                        local dx   = hasGPS and (pos.x - baseX) or 0
+                        local dz   = hasGPS and (pos.z - baseZ) or 0
+                        local dist = hasGPS and math.sqrt(dx*dx + dz*dz) or nil
+                        printAlert("ENTERED", name, dist)
+                    end
                 end
                 allPlayers[name] = { x = pos.x, y = pos.y, z = pos.z, lastSeen = now }
             end
