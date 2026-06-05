@@ -97,19 +97,22 @@ local function drawSweepLine(angle, col)
     end
 end
 
-local function drawPopup(name, data)
-    local lines = { name }
-    if data and hasGPS then
-        local dx   = data.x - baseX
-        local dy   = data.y - baseY
-        local dz   = data.z - baseZ
-        local dist = math.sqrt(dx*dx + dy*dy + dz*dz)
-        table.insert(lines, string.format("Dist: %.1f blk", dist))
-        table.insert(lines, string.format("X: %.0f", data.x))
-        table.insert(lines, string.format("Y: %.0f", data.y))
-        table.insert(lines, string.format("Z: %.0f", data.z))
-    else
-        table.insert(lines, "No GPS data")
+-- popup.names is a list; builds one entry per player in the group
+local function drawPopup(names)
+    local lines = {}
+    for _, name in ipairs(names) do
+        table.insert(lines, name)
+        local data = allPlayers[name]
+        if data and hasGPS then
+            local dx   = data.x - baseX
+            local dy   = data.y - baseY
+            local dz   = data.z - baseZ
+            local dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+            table.insert(lines, string.format("  %.1f blk (%d,%d,%d)", dist, data.x, data.y, data.z))
+        else
+            table.insert(lines, "  No GPS data")
+        end
+        if _ < #names then table.insert(lines, "") end  -- spacer between players
     end
 
     local bw = 2
@@ -229,8 +232,11 @@ local function radarLoop()
         monitor.setCursorPos(1, H)
         monitor.write(scaleText)
 
+        -- Group players whose screen positions are within 2 cells of each other
+        local groups = {}  -- each: {sx, sy, names, allAuth}
         playerScreenPos = {}
         local playerList = {}
+
         for name, data in pairs(allPlayers) do
             table.insert(playerList, name)
             if hasGPS then
@@ -240,16 +246,45 @@ local function radarLoop()
                 local sy = CY + math.floor((dz / displayRadius) * SCALE)
                 sx = math.max(1, math.min(W, sx))
                 sy = math.max(1, math.min(H, sy))
-                playerScreenPos[name] = { sx = sx, sy = sy }
-                local dotColor = AUTHORIZED[name] and colors.green or colors.red
-                put(sx, sy, dotColor, "O")
-                local label = name:sub(1, 6)
-                local lx = math.max(1, math.min(W - #label + 1, sx - math.floor(#label / 2)))
-                local ly = (sy > 2) and (sy - 1) or (sy + 1)
+
+                -- Find existing group within 2 cells
+                local merged = false
+                for _, g in ipairs(groups) do
+                    if math.abs(sx - g.sx) <= 2 and math.abs(sy - g.sy) <= 2 then
+                        table.insert(g.names, name)
+                        if not AUTHORIZED[name] then g.allAuth = false end
+                        merged = true
+                        break
+                    end
+                end
+                if not merged then
+                    table.insert(groups, {
+                        sx = sx, sy = sy,
+                        names = { name },
+                        allAuth = AUTHORIZED[name] == true
+                    })
+                end
+            end
+        end
+
+        -- Draw groups
+        for _, g in ipairs(groups) do
+            local dotColor = g.allAuth and colors.green or colors.red
+            local count    = #g.names
+            if count == 1 then
+                put(g.sx, g.sy, dotColor, "O")
+                local label = g.names[1]:sub(1, 6)
+                local lx = math.max(1, math.min(W - #label + 1, g.sx - math.floor(#label / 2)))
+                local ly = (g.sy > 2) and (g.sy - 1) or (g.sy + 1)
                 monitor.setBackgroundColor(colors.black)
                 monitor.setTextColor(colors.white)
                 monitor.setCursorPos(lx, math.max(1, math.min(H, ly)))
                 monitor.write(label)
+            else
+                put(g.sx, g.sy, dotColor, tostring(count > 9 and "+" or count))
+            end
+            for _, name in ipairs(g.names) do
+                playerScreenPos[name] = { sx = g.sx, sy = g.sy, group = g }
             end
         end
 
@@ -264,7 +299,7 @@ local function radarLoop()
             if row < 1 then break end
         end
 
-        if popup then drawPopup(popup.name, allPlayers[popup.name]) end
+        if popup then drawPopup(popup.names) end
 
         sweepAngle = (sweepAngle + SWEEP_STEP) % (math.pi * 2)
         sleep(0.05)
@@ -311,7 +346,8 @@ local function touchLoop()
             end
         end
         if hit then
-            popup = { name = hit, expires = os.clock() + 5 }
+            local g = playerScreenPos[hit] and playerScreenPos[hit].group
+            popup = { names = g and g.names or { hit }, expires = os.clock() + 5 }
         else
             popup = nil
         end
