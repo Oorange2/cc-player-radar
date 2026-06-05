@@ -1,4 +1,4 @@
--- AeroShields Player Radar v3
+-- AeroShields Player Radar v4
 -- bottom: player_detector | left: monitor | top: wireless modem
 
 local detector = peripheral.wrap("bottom")
@@ -16,12 +16,12 @@ local SCALE    = math.min(CX, CY) - 2
 local LOG_FILE    = "player_log.txt"
 local seenPlayers = {}
 local sweepAngle  = 0
-local SWEEP_STEP  = 0.12
-local TRAIL_STEPS = 14
+local SWEEP_STEP  = 0.28    -- fast rotation
+local TRAIL_STEPS = 4       -- short trail = skinnier look
 
 local cachedPlayers   = {}
-local playerScreenPos = {}   -- name -> {sx, sy} used for touch hit detection
-local popup           = nil  -- {name, info, expires} or nil
+local playerScreenPos = {}
+local popup           = nil
 
 -- ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -34,15 +34,18 @@ end
 
 local function put(x, y, col, char)
     if x < 1 or x > W or y < 1 or y > H then return end
+    monitor.setBackgroundColor(colors.black)
     monitor.setTextColor(col)
     monitor.setCursorPos(x, y)
     monitor.write(char)
 end
 
+-- Draws line from center to monitor edge at given angle
 local function drawSweepLine(angle, col)
-    for r = 1, SCALE do
+    for r = 1, math.max(W, H) do
         local px = CX + math.floor(math.cos(angle) * r)
         local py = CY + math.floor(math.sin(angle) * r * 0.5)
+        if px < 1 or px > W or py < 1 or py > H then break end
         put(px, py, col, ".")
     end
 end
@@ -58,28 +61,24 @@ local function drawPopup(name, info)
         table.insert(lines, string.format("X: %.0f", info.x))
         table.insert(lines, string.format("Y: %.0f", info.y))
         table.insert(lines, string.format("Z: %.0f", info.z))
-    elseif not hasGPS then
+    else
         table.insert(lines, "No GPS data")
     end
 
-    -- Box sizing
     local bw = 2
     for _, l in ipairs(lines) do bw = math.max(bw, #l + 2) end
     local bh = #lines + 2
     local bx = math.max(1, math.min(W - bw, CX - math.floor(bw / 2)))
     local by = math.max(1, math.min(H - bh, CY - math.floor(bh / 2)))
 
-    -- Background fill
     for row = by, by + bh - 1 do
         for col = bx, bx + bw - 1 do
             monitor.setBackgroundColor(colors.gray)
-            monitor.setTextColor(colors.white)
             monitor.setCursorPos(col, row)
             monitor.write(" ")
         end
     end
 
-    -- Border
     monitor.setBackgroundColor(colors.gray)
     monitor.setTextColor(colors.white)
     monitor.setCursorPos(bx, by)
@@ -91,7 +90,6 @@ local function drawPopup(name, info)
         monitor.setCursorPos(bx + bw - 1, row)   monitor.write("|")
     end
 
-    -- Text
     for i, line in ipairs(lines) do
         monitor.setBackgroundColor(colors.gray)
         monitor.setTextColor(i == 1 and colors.yellow or colors.white)
@@ -100,7 +98,7 @@ local function drawPopup(name, info)
     end
 end
 
--- ─── GPS lock ───────────────────────────────────────────────────────────────
+-- ─── GPS lock (do this BEFORE starting timers) ──────────────────────────────
 
 term.write("GPS... ")
 local baseX, baseY, baseZ = gps.locate(5)
@@ -109,10 +107,11 @@ print(hasGPS and "OK" or "no signal")
 if hasGPS then log("GPS locked " .. baseX .. "," .. baseY .. "," .. baseZ) end
 log("=== Radar started ===")
 
--- ─── Event loop ─────────────────────────────────────────────────────────────
-
+-- Timers must start AFTER gps.locate or their events get consumed during the wait
 local animTimer = os.startTimer(0.05)
 local pollTimer = os.startTimer(1)
+
+-- ─── Event loop ─────────────────────────────────────────────────────────────
 
 while true do
     local event, p1, p2, p3 = os.pullEvent()
@@ -120,23 +119,23 @@ while true do
     -- ── Animation tick ───────────────────────────────────────────────────────
     if event == "timer" and p1 == animTimer then
 
-        -- Expire popup
         if popup and os.clock() > popup.expires then popup = nil end
 
         monitor.setBackgroundColor(colors.black)
         monitor.clear()
 
-        -- Sweep trail + leading edge
+        -- Trailing lines (short = skinnier)
         for i = TRAIL_STEPS, 1, -1 do
-            local col = (i <= 4) and colors.lime or colors.green
-            drawSweepLine(sweepAngle - i * 0.07, col)
+            local col = (i <= 2) and colors.lime or colors.green
+            drawSweepLine(sweepAngle - i * 0.1, col)
         end
+        -- Bright leading edge
         drawSweepLine(sweepAngle, colors.lime)
 
         -- Crosshair
         put(CX, CY, colors.lime, "+")
 
-        -- Player dots
+        -- Player dots + labels
         playerScreenPos = {}
         local playerList = {}
         for name, info in pairs(cachedPlayers) do
@@ -155,6 +154,7 @@ while true do
                 local label = name:sub(1, 6)
                 local lx    = math.max(1, math.min(W - #label + 1, sx - math.floor(#label / 2)))
                 local ly    = (sy > 2) and (sy - 1) or (sy + 1)
+                monitor.setBackgroundColor(colors.black)
                 monitor.setTextColor(colors.white)
                 monitor.setCursorPos(lx, ly)
                 monitor.write(label)
@@ -165,6 +165,7 @@ while true do
         local row = H
         for _, name in ipairs(playerList) do
             local lx = math.max(1, W - #name)
+            monitor.setBackgroundColor(colors.black)
             monitor.setTextColor(colors.yellow)
             monitor.setCursorPos(lx, row)
             monitor.write(name)
@@ -172,7 +173,7 @@ while true do
             if row < 1 then break end
         end
 
-        -- Popup overlay (drawn last so it's on top)
+        -- Popup drawn last (on top of everything)
         if popup then drawPopup(popup.name, popup.info) end
 
         sweepAngle = (sweepAngle + SWEEP_STEP) % (math.pi * 2)
@@ -213,18 +214,16 @@ while true do
     elseif event == "monitor_touch" then
         local tx, ty = p2, p3
         local hit    = nil
-
         for name, pos in pairs(playerScreenPos) do
             if math.abs(tx - pos.sx) <= 2 and math.abs(ty - pos.sy) <= 2 then
                 hit = name
                 break
             end
         end
-
         if hit then
             popup = { name = hit, info = cachedPlayers[hit], expires = os.clock() + 5 }
         else
-            popup = nil   -- tap empty space to dismiss
+            popup = nil
         end
     end
 end
