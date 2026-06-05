@@ -1,7 +1,7 @@
-local inv = peripheral.find("inventoryManager")
-if not inv then error("No inventoryManager found") end
+local inv = peripheral.wrap("left")
+if not inv then error("No inventoryManager on left") end
 
-local PLAYER = "PlayerName" -- change this
+local PLAYER = "cypu001"
 
 print("Clearing " .. PLAYER .. "s inventory...")
 
