@@ -3,14 +3,9 @@
 
 local detector = peripheral.wrap("bottom")
 local monitor  = peripheral.wrap("left")
-local chatBox  = peripheral.wrap("right")
 
 if not detector then error("No player_detector on bottom") end
 if not monitor  then error("No monitor on left") end
-if not chatBox  then print("Warning: no chatBox on right - alerts disabled") end
-
-local WATCH_PLAYERS = { ["GPIO"] = true }
-local ALERT_PLAYERS = { "cypu", "Ooranges" }  -- who gets the /msg alert
 
 monitor.setTextScale(0.5)
 local W, H   = monitor.getSize()
@@ -139,21 +134,8 @@ local function radarLoop()
                             local dz   = info.z - baseZ
                             local dist = math.sqrt(dx*dx + dy*dy + dz*dz)
                             log(string.format("SPOTTED: %s  %.1f blk  (%.0f,%.0f,%.0f)", name, dist, dx, dy, dz))
-                            if WATCH_PLAYERS[name] and chatBox then
-                                local msg = "[RADAR] " .. name .. " entered range! " ..
-                                            string.format("%.1f blocks away", dist)
-                                for _, recipient in ipairs(ALERT_PLAYERS) do
-                                    chatBox.sendMessageToPlayer(msg, recipient, "Radar")
-                                end
-                            end
                         else
                             log("SPOTTED: " .. name)
-                            if WATCH_PLAYERS[name] and chatBox then
-                                local msg = "[RADAR] " .. name .. " entered range!"
-                                for _, recipient in ipairs(ALERT_PLAYERS) do
-                                    chatBox.sendMessageToPlayer(msg, recipient, "Radar")
-                                end
-                            end
                         end
                     end
                 end
