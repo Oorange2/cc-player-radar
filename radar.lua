@@ -19,6 +19,10 @@ local sweepAngle  = 0
 local SWEEP_STEP  = 0.28
 local TRAIL_STEPS = 4
 
+-- Declared here so all functions below can close over them
+local baseX, baseY, baseZ
+local hasGPS = false
+
 local cachedPlayers   = {}
 local playerScreenPos = {}
 local popup           = nil
@@ -98,8 +102,8 @@ end
 -- ─── GPS (runs before anything else) ────────────────────────────────────────
 
 term.write("GPS... ")
-local baseX, baseY, baseZ = gps.locate(5)
-local hasGPS = baseX ~= nil
+baseX, baseY, baseZ = gps.locate(5)
+hasGPS = baseX ~= nil
 print(hasGPS and "OK" or "no signal")
 if hasGPS then log("GPS locked " .. baseX .. "," .. baseY .. "," .. baseZ) end
 log("=== Radar started ===")
