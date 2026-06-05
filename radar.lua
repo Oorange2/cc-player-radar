@@ -19,6 +19,31 @@ local sweepAngle  = 0
 local SWEEP_STEP  = 0.28
 local TRAIL_STEPS = 4
 
+local AUTHORIZED = {
+    ["cypu001"]        = true,
+    ["SirAlf1808"]     = true,
+    ["ClothFisch"]     = true,
+    ["OlsChan"]        = true,
+    ["Ooranges"]       = true,
+    ["Glikus"]         = true,
+    ["Mechanoo"]       = true,
+    ["Cedjy"]          = true,
+    ["Quillowo"]       = true,
+    ["Alecs0603"]      = true,
+    ["Frigulus"]       = true,
+    ["Hannah_Panda"]   = true,
+    ["BeefBurgerrr"]   = true,
+    ["ZwergNaseErik"]  = true,
+    ["Vaedran"]        = true,
+    ["ski11az"]        = true,
+    ["Timmigamer06"]   = true,
+    ["Lux_silver"]     = true,
+    ["C0SMODEUS"]      = true,
+    ["levitanbloop"]   = true,
+    ["DrHarleySawyer_"]= true,
+    ["That_Dang_Fox"]  = true,
+}
+
 -- Declared here so all functions below can close over them
 local baseX, baseY, baseZ
 local hasGPS = false
@@ -173,7 +198,8 @@ local function radarLoop()
                 sx = math.max(1, math.min(W, sx))
                 sy = math.max(1, math.min(H, sy))
                 playerScreenPos[name] = { sx = sx, sy = sy }
-                put(sx, sy, colors.red, "O")
+                local dotColor = AUTHORIZED[name] and colors.green or colors.red
+                put(sx, sy, dotColor, "O")
                 local label = name:sub(1, 6)
                 local lx = math.max(1, math.min(W - #label + 1, sx - math.floor(#label / 2)))
                 local ly = (sy > 2) and (sy - 1) or (sy + 1)
