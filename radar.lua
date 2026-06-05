@@ -1,56 +1,70 @@
--- AeroShields Player Radar v5
--- bottom: player_detector | left: monitor | top: wireless modem
+-- AeroShields Player Radar Hub v6
+-- bottom: player_detector (local coverage) | left: 5x5 monitor | top: ender modem
 
-local detector = peripheral.wrap("bottom")
-local monitor  = peripheral.wrap("left")
+local PROTOCOL       = "aeroshields_radar"
+local DISPLAY_RADIUS = 500   -- blocks shown on radar map (covers all nodes)
+local LOCAL_RADIUS   = 100   -- local detector range
+local PLAYER_TIMEOUT = 3     -- seconds until a player is removed if nodes go quiet
 
-if not detector then error("No player_detector on bottom") end
-if not monitor  then error("No monitor on left") end
+local monitor = peripheral.wrap("left")
+if not monitor then error("No monitor on left") end
+
+local localDetector = peripheral.find("player_detector")
+
+-- Open ender modem
+local modemSide = nil
+for _, side in ipairs({"top","bottom","left","right","front","back"}) do
+    if peripheral.getType(side) == "modem" and side ~= "left" then
+        modemSide = side
+        break
+    end
+end
+if not modemSide then error("No ender modem found") end
+rednet.open(modemSide)
 
 monitor.setTextScale(0.5)
 local W, H   = monitor.getSize()
 local CX, CY = math.floor(W / 2), math.floor(H / 2)
-local RADIUS  = 100
-local SCALE   = math.min(CX, CY) - 2
+local SCALE  = math.min(CX, CY) - 2
 
 local LOG_FILE    = "player_log.txt"
-local seenPlayers = {}
 local sweepAngle  = 0
 local SWEEP_STEP  = 0.28
 local TRAIL_STEPS = 4
 
-local AUTHORIZED = {
-    ["cypu001"]        = true,
-    ["SirAlf1808"]     = true,
-    ["ClothFisch"]     = true,
-    ["OlsChan"]        = true,
-    ["Ooranges"]       = true,
-    ["Glikus"]         = true,
-    ["Mechanoo"]       = true,
-    ["Cedjy"]          = true,
-    ["Quillowo"]       = true,
-    ["Alecs0603"]      = true,
-    ["Frigulus"]       = true,
-    ["Hannah_Panda"]   = true,
-    ["BeefBurgerrr"]   = true,
-    ["ZwergNaseErik"]  = true,
-    ["Vaedran"]        = true,
-    ["ski11az"]        = true,
-    ["Timmigamer06"]   = true,
-    ["Lux_silver"]     = true,
-    ["C0SMODEUS"]      = true,
-    ["levitanbloop"]   = true,
-    ["DrHarleySawyer_"]= true,
-    ["That_Dang_Fox"]  = true,
-}
-
--- Declared here so all functions below can close over them
 local baseX, baseY, baseZ
 local hasGPS = false
 
-local cachedPlayers   = {}
+-- allPlayers[name] = {x, y, z, lastSeen}
+local allPlayers      = {}
+local seenPlayers     = {}
 local playerScreenPos = {}
 local popup           = nil
+
+local AUTHORIZED = {
+    ["cypu001"]         = true,
+    ["SirAlf1808"]      = true,
+    ["ClothFisch"]      = true,
+    ["OlsChan"]         = true,
+    ["Ooranges"]        = true,
+    ["Glikus"]          = true,
+    ["Mechanoo"]        = true,
+    ["Cedjy"]           = true,
+    ["Quillowo"]        = true,
+    ["Alecs0603"]       = true,
+    ["Frigulus"]        = true,
+    ["Hannah_Panda"]    = true,
+    ["BeefBurgerrr"]    = true,
+    ["ZwergNaseErik"]   = true,
+    ["Vaedran"]         = true,
+    ["ski11az"]         = true,
+    ["Timmigamer06"]    = true,
+    ["Lux_silver"]      = true,
+    ["C0SMODEUS"]       = true,
+    ["levitanbloop"]    = true,
+    ["DrHarleySawyer_"] = true,
+    ["That_Dang_Fox"]   = true,
+}
 
 -- ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -78,17 +92,17 @@ local function drawSweepLine(angle, col)
     end
 end
 
-local function drawPopup(name, info)
+local function drawPopup(name, data)
     local lines = { name }
-    if info and hasGPS then
-        local dx   = info.x - baseX
-        local dy   = info.y - baseY
-        local dz   = info.z - baseZ
+    if data and hasGPS then
+        local dx   = data.x - baseX
+        local dy   = data.y - baseY
+        local dz   = data.z - baseZ
         local dist = math.sqrt(dx*dx + dy*dy + dz*dz)
         table.insert(lines, string.format("Dist: %.1f blk", dist))
-        table.insert(lines, string.format("X: %.0f", info.x))
-        table.insert(lines, string.format("Y: %.0f", info.y))
-        table.insert(lines, string.format("Z: %.0f", info.z))
+        table.insert(lines, string.format("X: %.0f", data.x))
+        table.insert(lines, string.format("Y: %.0f", data.y))
+        table.insert(lines, string.format("Z: %.0f", data.z))
     else
         table.insert(lines, "No GPS data")
     end
@@ -124,56 +138,54 @@ local function drawPopup(name, info)
     end
 end
 
--- ─── GPS (runs before anything else) ────────────────────────────────────────
+-- ─── GPS ────────────────────────────────────────────────────────────────────
 
 term.write("GPS... ")
 baseX, baseY, baseZ = gps.locate(5)
 hasGPS = baseX ~= nil
 print(hasGPS and "OK" or "no signal")
 if hasGPS then log("GPS locked " .. baseX .. "," .. baseY .. "," .. baseZ) end
-log("=== Radar started ===")
+log("=== Radar Hub started ===")
 
--- ─── Radar loop (animation + polling) ───────────────────────────────────────
+-- ─── Radar loop ─────────────────────────────────────────────────────────────
 
 local function radarLoop()
-    local lastPoll = -999
+    local lastLocalPoll = -999
 
     while true do
         local now = os.clock()
 
-        -- Poll player detector every 1 second
-        if now - lastPoll >= 1 then
-            lastPoll = now
-            local ok, names = pcall(detector.getPlayersInRange, RADIUS)
+        -- Local detector
+        if localDetector and now - lastLocalPoll >= 1 then
+            lastLocalPoll = now
+            local ok, names = pcall(localDetector.getPlayersInRange, LOCAL_RADIUS)
             if ok and type(names) == "table" then
-                local current = {}
-                local newCache = {}
                 for _, name in ipairs(names) do
-                    current[name] = true
-                    local info = detector.getPlayer(name)
-                    newCache[name] = info
-                    if not seenPlayers[name] then
-                        if info and hasGPS then
-                            local dx   = info.x - baseX
-                            local dy   = info.y - baseY
-                            local dz   = info.z - baseZ
-                            local dist = math.sqrt(dx*dx + dy*dy + dz*dz)
-                            log(string.format("SPOTTED: %s  %.1f blk  (%.0f,%.0f,%.0f)", name, dist, dx, dy, dz))
-                        else
-                            log("SPOTTED: " .. name)
+                    local info = localDetector.getPlayer(name)
+                    if info then
+                        if not seenPlayers[name] then
+                            log("SPOTTED (local): " .. name)
                         end
+                        allPlayers[name] = { x = info.x, y = info.y, z = info.z, lastSeen = now }
                     end
                 end
-                for name in pairs(seenPlayers) do
-                    if not current[name] then log("LEFT: " .. name) end
-                end
-                seenPlayers   = current
-                cachedPlayers = newCache
             end
         end
 
+        -- Prune stale players
+        for name, data in pairs(allPlayers) do
+            if now - data.lastSeen > PLAYER_TIMEOUT then
+                log("LEFT: " .. name)
+                allPlayers[name] = nil
+            end
+        end
+
+        -- Rebuild seenPlayers
+        seenPlayers = {}
+        for name in pairs(allPlayers) do seenPlayers[name] = true end
+
         -- Expire popup
-        if popup and os.clock() > popup.expires then popup = nil end
+        if popup and now > popup.expires then popup = nil end
 
         -- Draw frame
         monitor.setBackgroundColor(colors.black)
@@ -185,16 +197,15 @@ local function radarLoop()
         drawSweepLine(sweepAngle, colors.lime)
         put(CX, CY, colors.lime, "+")
 
-        -- Players
         playerScreenPos = {}
         local playerList = {}
-        for name, info in pairs(cachedPlayers) do
+        for name, data in pairs(allPlayers) do
             table.insert(playerList, name)
-            if hasGPS and info then
-                local dx = info.x - baseX
-                local dz = info.z - baseZ
-                local sx = CX + math.floor((dx / RADIUS) * SCALE)
-                local sy = CY + math.floor((dz / RADIUS) * SCALE)
+            if hasGPS then
+                local dx = data.x - baseX
+                local dz = data.z - baseZ
+                local sx = CX + math.floor((dx / DISPLAY_RADIUS) * SCALE)
+                local sy = CY + math.floor((dz / DISPLAY_RADIUS) * SCALE)
                 sx = math.max(1, math.min(W, sx))
                 sy = math.max(1, math.min(H, sy))
                 playerScreenPos[name] = { sx = sx, sy = sy }
@@ -210,21 +221,38 @@ local function radarLoop()
             end
         end
 
-        -- Name list bottom-right
+        -- Player list bottom-right, colored by auth
         local row = H
         for _, name in ipairs(playerList) do
             monitor.setBackgroundColor(colors.black)
-            monitor.setTextColor(colors.yellow)
+            monitor.setTextColor(AUTHORIZED[name] and colors.green or colors.red)
             monitor.setCursorPos(math.max(1, W - #name), row)
             monitor.write(name)
             row = row - 1
             if row < 1 then break end
         end
 
-        if popup then drawPopup(popup.name, popup.info) end
+        if popup then drawPopup(popup.name, allPlayers[popup.name]) end
 
         sweepAngle = (sweepAngle + SWEEP_STEP) % (math.pi * 2)
         sleep(0.05)
+    end
+end
+
+-- ─── Network receiver loop ───────────────────────────────────────────────────
+
+local function networkLoop()
+    while true do
+        local _, msg = rednet.receive(PROTOCOL, 5)
+        if msg and type(msg) == "table" and msg.type == "radar_data" then
+            local now = os.clock()
+            for name, pos in pairs(msg.players) do
+                if not seenPlayers[name] then
+                    log("SPOTTED (node " .. msg.nodeId .. "): " .. name)
+                end
+                allPlayers[name] = { x = pos.x, y = pos.y, z = pos.z, lastSeen = now }
+            end
+        end
     end
 end
 
@@ -241,12 +269,11 @@ local function touchLoop()
             end
         end
         if hit then
-            popup = { name = hit, info = cachedPlayers[hit], expires = os.clock() + 5 }
+            popup = { name = hit, expires = os.clock() + 5 }
         else
             popup = nil
         end
     end
 end
 
--- Run both loops concurrently
-parallel.waitForAny(radarLoop, touchLoop)
+parallel.waitForAny(radarLoop, networkLoop, touchLoop)
