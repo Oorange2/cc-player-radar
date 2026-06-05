@@ -2,9 +2,10 @@
 -- bottom: player_detector (local coverage) | left: 5x5 monitor | top: ender modem
 
 local PROTOCOL       = "aeroshields_radar"
-local DISPLAY_RADIUS = 500   -- blocks shown on radar map (covers all nodes)
+local MIN_RADIUS     = 200   -- minimum display radius even with no nodes
 local LOCAL_RADIUS   = 100   -- local detector range
 local PLAYER_TIMEOUT = 3     -- seconds until a player is removed if nodes go quiet
+local NODE_TIMEOUT   = 10    -- seconds until a node is considered offline
 
 local monitor = peripheral.wrap("left")
 if not monitor then error("No monitor on left") end
@@ -40,6 +41,10 @@ local allPlayers      = {}
 local seenPlayers     = {}
 local playerScreenPos = {}
 local popup           = nil
+
+-- activeNodes[nodeId] = {x, y, z, lastSeen}
+local activeNodes     = {}
+local displayRadius   = MIN_RADIUS
 
 local AUTHORIZED = {
     ["cypu001"]         = true,
@@ -138,6 +143,23 @@ local function drawPopup(name, data)
     end
 end
 
+local function calcDisplayRadius()
+    if not hasGPS then return MIN_RADIUS end
+    local now    = os.clock()
+    local maxDist = MIN_RADIUS
+    for nodeId, node in pairs(activeNodes) do
+        if now - node.lastSeen > NODE_TIMEOUT then
+            activeNodes[nodeId] = nil
+        else
+            local dx   = node.x - baseX
+            local dz   = node.z - baseZ
+            local dist = math.sqrt(dx*dx + dz*dz) + LOCAL_RADIUS
+            if dist > maxDist then maxDist = dist end
+        end
+    end
+    return maxDist * 1.15  -- 15% padding so nodes aren't right at the edge
+end
+
 -- ─── GPS ────────────────────────────────────────────────────────────────────
 
 term.write("GPS... ")
@@ -187,6 +209,9 @@ local function radarLoop()
         -- Expire popup
         if popup and now > popup.expires then popup = nil end
 
+        -- Recalculate display radius each frame
+        displayRadius = calcDisplayRadius()
+
         -- Draw frame
         monitor.setBackgroundColor(colors.black)
         monitor.clear()
@@ -197,6 +222,13 @@ local function radarLoop()
         drawSweepLine(sweepAngle, colors.lime)
         put(CX, CY, colors.lime, "+")
 
+        -- Scale indicator bottom-left
+        local scaleText = "R:" .. math.floor(displayRadius) .. "m"
+        monitor.setBackgroundColor(colors.black)
+        monitor.setTextColor(colors.gray)
+        monitor.setCursorPos(1, H)
+        monitor.write(scaleText)
+
         playerScreenPos = {}
         local playerList = {}
         for name, data in pairs(allPlayers) do
@@ -204,8 +236,8 @@ local function radarLoop()
             if hasGPS then
                 local dx = data.x - baseX
                 local dz = data.z - baseZ
-                local sx = CX + math.floor((dx / DISPLAY_RADIUS) * SCALE)
-                local sy = CY + math.floor((dz / DISPLAY_RADIUS) * SCALE)
+                local sx = CX + math.floor((dx / displayRadius) * SCALE)
+                local sy = CY + math.floor((dz / displayRadius) * SCALE)
                 sx = math.max(1, math.min(W, sx))
                 sy = math.max(1, math.min(H, sy))
                 playerScreenPos[name] = { sx = sx, sy = sy }
@@ -246,6 +278,16 @@ local function networkLoop()
         local _, msg = rednet.receive(PROTOCOL, 5)
         if msg and type(msg) == "table" and msg.type == "radar_data" then
             local now = os.clock()
+
+            -- Track node position for auto-scaling
+            local nx, ny, nz = msg.nodeId:match("(-?%d+),(-?%d+),(-?%d+)")
+            if nx then
+                activeNodes[msg.nodeId] = {
+                    x = tonumber(nx), y = tonumber(ny), z = tonumber(nz),
+                    lastSeen = now
+                }
+            end
+
             for name, pos in pairs(msg.players) do
                 if not seenPlayers[name] then
                     log("SPOTTED (node " .. msg.nodeId .. "): " .. name)
