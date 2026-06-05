@@ -1,5 +1,5 @@
 local inv = peripheral.wrap("left")
-if not inv then error("No inventoryManager on left") end
+if not inv then error("No inventory_manager on left") end
 
 local PLAYER = "cypu001"
 
