@@ -1,4 +1,4 @@
--- AeroShields Player Radar v4
+-- AeroShields Player Radar v5
 -- bottom: player_detector | left: monitor | top: wireless modem
 
 local detector = peripheral.wrap("bottom")
@@ -8,16 +8,16 @@ if not detector then error("No player_detector on bottom") end
 if not monitor  then error("No monitor on left") end
 
 monitor.setTextScale(0.5)
-local W, H    = monitor.getSize()
-local CX, CY  = math.floor(W / 2), math.floor(H / 2)
-local RADIUS   = 100
-local SCALE    = math.min(CX, CY) - 2
+local W, H   = monitor.getSize()
+local CX, CY = math.floor(W / 2), math.floor(H / 2)
+local RADIUS  = 100
+local SCALE   = math.min(CX, CY) - 2
 
 local LOG_FILE    = "player_log.txt"
 local seenPlayers = {}
 local sweepAngle  = 0
-local SWEEP_STEP  = 0.28    -- fast rotation
-local TRAIL_STEPS = 4       -- short trail = skinnier look
+local SWEEP_STEP  = 0.28
+local TRAIL_STEPS = 4
 
 local cachedPlayers   = {}
 local playerScreenPos = {}
@@ -40,7 +40,6 @@ local function put(x, y, col, char)
     monitor.write(char)
 end
 
--- Draws line from center to monitor edge at given angle
 local function drawSweepLine(angle, col)
     for r = 1, math.max(W, H) do
         local px = CX + math.floor(math.cos(angle) * r)
@@ -78,7 +77,6 @@ local function drawPopup(name, info)
             monitor.write(" ")
         end
     end
-
     monitor.setBackgroundColor(colors.gray)
     monitor.setTextColor(colors.white)
     monitor.setCursorPos(bx, by)
@@ -86,10 +84,9 @@ local function drawPopup(name, info)
     monitor.setCursorPos(bx, by + bh - 1)
     monitor.write("+" .. string.rep("-", bw - 2) .. "+")
     for row = by + 1, by + bh - 2 do
-        monitor.setCursorPos(bx, row)             monitor.write("|")
-        monitor.setCursorPos(bx + bw - 1, row)   monitor.write("|")
+        monitor.setCursorPos(bx, row)           monitor.write("|")
+        monitor.setCursorPos(bx + bw - 1, row) monitor.write("|")
     end
-
     for i, line in ipairs(lines) do
         monitor.setBackgroundColor(colors.gray)
         monitor.setTextColor(i == 1 and colors.yellow or colors.white)
@@ -98,7 +95,7 @@ local function drawPopup(name, info)
     end
 end
 
--- ─── GPS lock (do this BEFORE starting timers) ──────────────────────────────
+-- ─── GPS (runs before anything else) ────────────────────────────────────────
 
 term.write("GPS... ")
 local baseX, baseY, baseZ = gps.locate(5)
@@ -107,35 +104,59 @@ print(hasGPS and "OK" or "no signal")
 if hasGPS then log("GPS locked " .. baseX .. "," .. baseY .. "," .. baseZ) end
 log("=== Radar started ===")
 
--- Timers must start AFTER gps.locate or their events get consumed during the wait
-local animTimer = os.startTimer(0.05)
-local pollTimer = os.startTimer(1)
+-- ─── Radar loop (animation + polling) ───────────────────────────────────────
 
--- ─── Event loop ─────────────────────────────────────────────────────────────
+local function radarLoop()
+    local lastPoll = -999
 
-while true do
-    local event, p1, p2, p3 = os.pullEvent()
+    while true do
+        local now = os.clock()
 
-    -- ── Animation tick ───────────────────────────────────────────────────────
-    if event == "timer" and p1 == animTimer then
+        -- Poll player detector every 1 second
+        if now - lastPoll >= 1 then
+            lastPoll = now
+            local ok, names = pcall(detector.getPlayersInRange, RADIUS)
+            if ok and type(names) == "table" then
+                local current = {}
+                local newCache = {}
+                for _, name in ipairs(names) do
+                    current[name] = true
+                    local info = detector.getPlayer(name)
+                    newCache[name] = info
+                    if not seenPlayers[name] then
+                        if info and hasGPS then
+                            local dx   = info.x - baseX
+                            local dy   = info.y - baseY
+                            local dz   = info.z - baseZ
+                            local dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+                            log(string.format("SPOTTED: %s  %.1f blk  (%.0f,%.0f,%.0f)", name, dist, dx, dy, dz))
+                        else
+                            log("SPOTTED: " .. name)
+                        end
+                    end
+                end
+                for name in pairs(seenPlayers) do
+                    if not current[name] then log("LEFT: " .. name) end
+                end
+                seenPlayers   = current
+                cachedPlayers = newCache
+            end
+        end
 
+        -- Expire popup
         if popup and os.clock() > popup.expires then popup = nil end
 
+        -- Draw frame
         monitor.setBackgroundColor(colors.black)
         monitor.clear()
 
-        -- Trailing lines (short = skinnier)
         for i = TRAIL_STEPS, 1, -1 do
-            local col = (i <= 2) and colors.lime or colors.green
-            drawSweepLine(sweepAngle - i * 0.1, col)
+            drawSweepLine(sweepAngle - i * 0.1, i <= 2 and colors.lime or colors.green)
         end
-        -- Bright leading edge
         drawSweepLine(sweepAngle, colors.lime)
-
-        -- Crosshair
         put(CX, CY, colors.lime, "+")
 
-        -- Player dots + labels
+        -- Players
         playerScreenPos = {}
         local playerList = {}
         for name, info in pairs(cachedPlayers) do
@@ -148,72 +169,41 @@ while true do
                 sx = math.max(1, math.min(W, sx))
                 sy = math.max(1, math.min(H, sy))
                 playerScreenPos[name] = { sx = sx, sy = sy }
-
                 put(sx, sy, colors.red, "O")
-
                 local label = name:sub(1, 6)
-                local lx    = math.max(1, math.min(W - #label + 1, sx - math.floor(#label / 2)))
-                local ly    = (sy > 2) and (sy - 1) or (sy + 1)
+                local lx = math.max(1, math.min(W - #label + 1, sx - math.floor(#label / 2)))
+                local ly = (sy > 2) and (sy - 1) or (sy + 1)
                 monitor.setBackgroundColor(colors.black)
                 monitor.setTextColor(colors.white)
-                monitor.setCursorPos(lx, ly)
+                monitor.setCursorPos(lx, math.max(1, math.min(H, ly)))
                 monitor.write(label)
             end
         end
 
-        -- Player list bottom-right
+        -- Name list bottom-right
         local row = H
         for _, name in ipairs(playerList) do
-            local lx = math.max(1, W - #name)
             monitor.setBackgroundColor(colors.black)
             monitor.setTextColor(colors.yellow)
-            monitor.setCursorPos(lx, row)
+            monitor.setCursorPos(math.max(1, W - #name), row)
             monitor.write(name)
             row = row - 1
             if row < 1 then break end
         end
 
-        -- Popup drawn last (on top of everything)
         if popup then drawPopup(popup.name, popup.info) end
 
         sweepAngle = (sweepAngle + SWEEP_STEP) % (math.pi * 2)
-        animTimer  = os.startTimer(0.05)
+        sleep(0.05)
+    end
+end
 
-    -- ── Player poll ──────────────────────────────────────────────────────────
-    elseif event == "timer" and p1 == pollTimer then
+-- ─── Touch loop ─────────────────────────────────────────────────────────────
 
-        local ok, names = pcall(detector.getPlayersInRange, RADIUS)
-        if ok and type(names) == "table" then
-            local currentPlayers = {}
-            local newCache       = {}
-            for _, name in ipairs(names) do
-                currentPlayers[name] = true
-                local info = detector.getPlayer(name)
-                newCache[name] = info
-                if not seenPlayers[name] then
-                    if info and hasGPS then
-                        local dx   = info.x - baseX
-                        local dy   = info.y - baseY
-                        local dz   = info.z - baseZ
-                        local dist = math.sqrt(dx*dx + dy*dy + dz*dz)
-                        log(string.format("SPOTTED: %s  %.1f blk  (%.0f,%.0f,%.0f)", name, dist, dx, dy, dz))
-                    else
-                        log("SPOTTED: " .. name)
-                    end
-                end
-            end
-            for name in pairs(seenPlayers) do
-                if not currentPlayers[name] then log("LEFT: " .. name) end
-            end
-            seenPlayers   = currentPlayers
-            cachedPlayers = newCache
-        end
-        pollTimer = os.startTimer(1)
-
-    -- ── Touch ────────────────────────────────────────────────────────────────
-    elseif event == "monitor_touch" then
-        local tx, ty = p2, p3
-        local hit    = nil
+local function touchLoop()
+    while true do
+        local _, _, tx, ty = os.pullEvent("monitor_touch")
+        local hit = nil
         for name, pos in pairs(playerScreenPos) do
             if math.abs(tx - pos.sx) <= 2 and math.abs(ty - pos.sy) <= 2 then
                 hit = name
@@ -227,3 +217,6 @@ while true do
         end
     end
 end
+
+-- Run both loops concurrently
+parallel.waitForAny(radarLoop, touchLoop)
