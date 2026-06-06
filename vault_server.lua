@@ -16,10 +16,10 @@ local DELIVERY_VAULT_DIR = "back"   -- side of delivery vault from inventory man
 -- packager: wired peripheral name of the packager
 
 local SOURCES = {
-    { vault="create:item_vault_1", buffer="minecraft:barrel_0", packager="Create_Packager_1" },
-    { vault="create:item_vault_2", buffer="minecraft:barrel_1", packager="Create_Packager_2" },
-    { vault="create:item_vault_3", buffer="minecraft:barrel_2", packager="Create_Packager_3" },
-    { vault="create:item_vault_4", buffer="minecraft:barrel_3", packager="Create_Packager_4" },
+    { vault="create:item_vault_1", buffer="minecraft:barrel_0", packager="Create_Packager_0" },
+    { vault="create:item_vault_2", buffer="minecraft:barrel_1", packager="Create_Packager_1" },
+    { vault="create:item_vault_3", buffer="minecraft:barrel_2", packager="Create_Packager_2" },
+    { vault="create:item_vault_4", buffer="minecraft:barrel_3", packager="Create_Packager_3" },
 }
 
 -- ─── Setup ───────────────────────────────────────────────────────────────────
