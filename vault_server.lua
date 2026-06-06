@@ -11,7 +11,6 @@
 
 local PROTOCOL           = "vault_ui"
 local DELIVERY_VAULT_DIR = "back"   -- side of delivery vault from inventory manager
-local INV_MANAGER_SIDE   = "left"   -- side inventory manager is on
 
 -- ─── Setup ──────────────────────────────────────────────────────────────────
 
