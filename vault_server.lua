@@ -15,8 +15,8 @@ local INV_MANAGER_SIDE   = "left"   -- side inventory manager is on
 
 -- ─── Setup ──────────────────────────────────────────────────────────────────
 
-local inv = peripheral.wrap(INV_MANAGER_SIDE)
-if not inv then error("No inventory_manager on " .. INV_MANAGER_SIDE) end
+local inv = peripheral.find("inventory_manager")
+if not inv then error("No inventory_manager found on network") end
 
 -- Get delivery address from the player linked to the inventory manager
 local DELIVERY_ADDRESS = inv.getOwner()
