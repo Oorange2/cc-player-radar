@@ -104,15 +104,23 @@ local function sendItem(itemName, count)
         return false, "Station peripheral missing - check wiring"
     end
 
-    -- Clear the buffer first (send any leftover items back to vault)
+    -- Clear the buffer first (pull any leftover items back to vault)
     local bufItems = buffer.list()
     for slot, _ in pairs(bufItems) do
-        buffer.pushItems(foundStation.vault, slot)
+        vault.pullItems(foundStation.buffer, slot)
     end
 
-    -- Move just the requested item from vault to buffer
-    local moved = vault.pushItems(foundStation.buffer, foundSlot, count)
-    if moved == 0 then return false, "Failed to move item to buffer" end
+    -- Pull just the requested item from vault into buffer
+    local moved = 0
+    local vaultItems = vault.list()
+    for slot, item in pairs(vaultItems) do
+        if item.name == itemName then
+            local amount = math.min(item.count, count - moved)
+            moved = moved + buffer.pullItems(foundStation.vault, slot, amount)
+            if moved >= count then break end
+        end
+    end
+    if moved == 0 then return false, "Failed to pull item into buffer" end
 
     -- Wait a tick for packager to register the new items
     sleep(0.1)
