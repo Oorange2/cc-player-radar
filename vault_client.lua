@@ -1,9 +1,9 @@
--- Vault Client v5
+-- Vault Client v6
 -- Up/Down or scroll to browse  |  Shift+Scroll = adjust send amount
--- Enter = send  |  R = refresh  |  Q = quit
+-- / = search  |  Enter = send  |  R = refresh  |  Q = quit
 
 local PROTOCOL      = "vault_ui"
-local REFRESH_EVERY = 30  -- seconds
+local REFRESH_EVERY = 30
 
 local modemSide = nil
 for _, side in ipairs({"top","bottom","left","right","front","back"}) do
@@ -30,16 +30,19 @@ if localPlayer == "" then localPlayer = "Player" end
 
 -- ─── State ───────────────────────────────────────────────────────────────────
 
-local W, H      = term.getSize()
-local items     = {}
-local selected  = 1
-local scroll    = 0
-local serverId  = nil
-local message   = ""
-local msgTimer  = 0
-local shiftHeld = false
-local sendCount = 1
+local W, H         = term.getSize()
+local items        = {}
+local filtered     = {}
+local selected     = 1
+local scroll       = 0
+local serverId     = nil
+local message      = ""
+local msgTimer     = 0
+local shiftHeld    = false
+local sendCount    = 1
 local refreshTimer = nil
+local searchMode   = false
+local searchQuery  = ""
 
 -- ─── Item icon colors ────────────────────────────────────────────────────────
 
@@ -53,6 +56,25 @@ local function itemColor(name)
     local h = 0
     for i = 1, #name do h = (h * 31 + string.byte(name, i)) % #iconColors end
     return iconColors[h + 1]
+end
+
+-- ─── Filter ──────────────────────────────────────────────────────────────────
+
+local function applyFilter()
+    if searchQuery == "" then
+        filtered = items
+    else
+        local q = searchQuery:lower()
+        filtered = {}
+        for _, item in ipairs(items) do
+            local label = (item.displayName or item.name):lower()
+            if label:find(q, 1, true) then
+                table.insert(filtered, item)
+            end
+        end
+    end
+    selected = 1
+    scroll   = 0
 end
 
 -- ─── Network ─────────────────────────────────────────────────────────────────
@@ -70,20 +92,26 @@ end
 local function doRefresh()
     local fresh = fetch()
     if fresh then
-        items    = fresh
-        selected = math.min(selected, math.max(1, #items))
+        items = fresh
+        applyFilter()
     end
     refreshTimer = os.startTimer(REFRESH_EVERY)
 end
 
 local function sendItem()
-    local item = items[selected]
+    local item = filtered[selected]
     if not item or not serverId then return end
-    rednet.send(serverId, { type="send_item", name=item.name, count=sendCount, player=localPlayer }, PROTOCOL)
+    local cap   = math.min(sendCount, item.count)
+    if cap < 1 then
+        message  = "Out of stock"
+        msgTimer = os.clock() + 2
+        return
+    end
+    rednet.send(serverId, { type="send_item", name=item.name, count=cap, player=localPlayer }, PROTOCOL)
     local _, res = rednet.receive(PROTOCOL, 10)
     local label  = item.displayName or item.name
     if res and res.ok then
-        message  = "Sent x" .. sendCount .. ": " .. label
+        message  = "Sent x" .. cap .. ": " .. label
         msgTimer = os.clock() + 3
     else
         message  = (res and res.err) or "Failed"
@@ -103,16 +131,24 @@ local function draw()
     term.setTextColor(colors.white)
     term.setCursorPos(1, 1)
     term.clearLine()
-    local header = " " .. localPlayer .. " [" .. #items .. "]"
-    local countLabel = " x" .. sendCount
-    local pad = W - #header - #countLabel
-    term.write(header .. string.rep(" ", math.max(0, pad)) .. countLabel)
+    local curItem   = filtered[selected]
+    local cap       = curItem and math.min(sendCount, curItem.count) or sendCount
+    local countLabel = " x" .. cap
+    if searchMode then
+        local prompt = "/" .. searchQuery
+        local pad = W - #prompt - #countLabel
+        term.write(prompt .. string.rep(" ", math.max(0, pad)) .. countLabel)
+    else
+        local header = " " .. localPlayer .. " [" .. #filtered .. "]"
+        local pad = W - #header - #countLabel
+        term.write(header .. string.rep(" ", math.max(0, pad)) .. countLabel)
+    end
 
     -- Item list
     local listH = H - 2
     for row = 1, listH do
         local idx  = row + scroll
-        local item = items[idx]
+        local item = filtered[idx]
         term.setCursorPos(1, row + 1)
 
         if item then
@@ -150,7 +186,11 @@ local function draw()
     else
         message = ""
         term.setTextColor(colors.gray)
-        term.write("Entr=snd Shft+Scrl=amt R=rfsh Q=quit")
+        if searchMode then
+            term.write("ESC=cancel  Enter=confirm search")
+        else
+            term.write("/=srch Entr=snd Shft+Scrl=amt R=rfsh")
+        end
     end
 end
 
@@ -164,6 +204,7 @@ if not items then
     print("Server not found!")
     return
 end
+applyFilter()
 refreshTimer = os.startTimer(REFRESH_EVERY)
 
 while true do
@@ -171,50 +212,74 @@ while true do
 
     local event, p1, p2, p3 = os.pullEvent()
 
-    if event == "key" then
-        if p1 == keys.leftShift or p1 == keys.rightShift then
-            shiftHeld = true
-        elseif p1 == keys.up then
-            if selected > 1 then
-                selected = selected - 1
-                if selected <= scroll then scroll = scroll - 1 end
+    if searchMode then
+        if event == "char" then
+            searchQuery = searchQuery .. p1
+            applyFilter()
+        elseif event == "key" then
+            if p1 == keys.backspace then
+                searchQuery = searchQuery:sub(1, -2)
+                applyFilter()
+            elseif p1 == keys.enter then
+                searchMode = false
+            elseif p1 == keys.escape then
+                searchMode  = false
+                searchQuery = ""
+                applyFilter()
             end
-        elseif p1 == keys.down then
-            if selected < #items then
-                selected = selected + 1
-                if selected > scroll + (H - 2) then scroll = scroll + 1 end
+        end
+
+    else
+        if event == "key" then
+            if p1 == keys.leftShift or p1 == keys.rightShift then
+                shiftHeld = true
+            elseif p1 == keys.up then
+                if selected > 1 then
+                    selected = selected - 1
+                    if selected <= scroll then scroll = scroll - 1 end
+                end
+            elseif p1 == keys.down then
+                if selected < #filtered then
+                    selected = selected + 1
+                    if selected > scroll + (H - 2) then scroll = scroll + 1 end
+                end
+            elseif p1 == keys.enter then
+                sendItem()
+            elseif p1 == keys.r then
+                doRefresh()
+                message  = "Refreshed"
+                msgTimer = os.clock() + 1
+            elseif p1 == keys.q then
+                break
+            elseif p1 == keys.slash then
+                searchMode  = true
+                searchQuery = ""
+                applyFilter()
             end
-        elseif p1 == keys.enter then
-            sendItem()
-        elseif p1 == keys.r then
+
+        elseif event == "key_up" then
+            if p1 == keys.leftShift or p1 == keys.rightShift then
+                shiftHeld = false
+            end
+
+        elseif event == "mouse_scroll" then
+            if shiftHeld then
+                local curItem = filtered[selected]
+                local maxCount = curItem and curItem.count or 9999
+                sendCount = math.max(1, math.min(sendCount - p1, maxCount))
+            else
+                if p1 == -1 and selected > 1 then
+                    selected = selected - 1
+                    if selected <= scroll then scroll = scroll - 1 end
+                elseif p1 == 1 and selected < #filtered then
+                    selected = selected + 1
+                    if selected > scroll + (H - 2) then scroll = scroll + 1 end
+                end
+            end
+
+        elseif event == "timer" and p1 == refreshTimer then
             doRefresh()
-            message  = "Refreshed"
-            msgTimer = os.clock() + 1
-        elseif p1 == keys.q then
-            break
         end
-
-    elseif event == "key_up" then
-        if p1 == keys.leftShift or p1 == keys.rightShift then
-            shiftHeld = false
-        end
-
-    elseif event == "mouse_scroll" then
-        if shiftHeld then
-            -- adjust send count
-            sendCount = math.max(1, sendCount + p1)
-        else
-            if p1 == -1 and selected > 1 then
-                selected = selected - 1
-                if selected <= scroll then scroll = scroll - 1 end
-            elseif p1 == 1 and selected < #items then
-                selected = selected + 1
-                if selected > scroll + (H - 2) then scroll = scroll + 1 end
-            end
-        end
-
-    elseif event == "timer" and p1 == refreshTimer then
-        doRefresh()
     end
 end
 
