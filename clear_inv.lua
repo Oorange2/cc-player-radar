@@ -8,7 +8,7 @@ print("Clearing " .. PLAYER .. "s inventory...")
 local items = inv.getItems(PLAYER)
 for _, item in pairs(items) do
     if item.name and item.name ~= "minecraft:air" then
-        inv.removeItemFromPlayer(PLAYER, {slot=item.slot, count=item.count})
+        inv.removeItemFromPlayer(PLAYER, {name=item.name, count=item.count})
     end
 end
 
