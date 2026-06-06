@@ -49,14 +49,14 @@ local pendingItems = {}  -- items sent via frogport waiting to be delivered
 local function listAllItems()
     local merged = {}
     for _, station in ipairs(SOURCES) do
-        local vault = peripheral.wrap(station.vault)
-        if vault then
-            local ok, items = pcall(vault.list)
+        local packager = peripheral.wrap(station.packager)
+        if packager then
+            local ok, items = pcall(packager.list)
             if ok and type(items) == "table" then
                 for slot, item in pairs(items) do
                     if not merged[item.name] then
                         local detail = nil
-                        pcall(function() detail = vault.getItemDetail(slot) end)
+                        pcall(function() detail = packager.getItemDetail(slot) end)
                         merged[item.name] = {
                             name        = item.name,
                             displayName = (detail and detail.displayName) or item.name,
@@ -78,9 +78,9 @@ local function sendItem(itemName, count)
     -- Find which station has the item
     local foundStation, foundSlot = nil, nil
     for _, station in ipairs(SOURCES) do
-        local vault = peripheral.wrap(station.vault)
-        if vault then
-            local ok, items = pcall(vault.list)
+        local packager = peripheral.wrap(station.packager)
+        if packager then
+            local ok, items = pcall(packager.list)
             if ok and type(items) == "table" then
                 for slot, item in pairs(items) do
                     if item.name == itemName then
@@ -110,16 +110,8 @@ local function sendItem(itemName, count)
         vault.pullItems(foundStation.buffer, slot)
     end
 
-    -- Pull just the requested item from vault into buffer
-    local moved = 0
-    local vaultItems = vault.list()
-    for slot, item in pairs(vaultItems) do
-        if item.name == itemName then
-            local amount = math.min(item.count, count - moved)
-            moved = moved + buffer.pullItems(foundStation.vault, slot, amount)
-            if moved >= count then break end
-        end
-    end
+    -- Pull just the requested item from vault into buffer using known slot
+    local moved = buffer.pullItems(foundStation.vault, foundSlot, count)
     if moved == 0 then return false, "Failed to pull item into buffer" end
 
     -- Wait a tick for packager to register the new items
