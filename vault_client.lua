@@ -1,6 +1,5 @@
--- Vault Client v6
--- Up/Down or scroll to browse  |  Shift+Scroll = adjust send amount
--- / = search  |  Enter = send  |  R = refresh  |  Q = quit
+-- Vault Client v7
+-- / = search  |  Shift+Scroll = adjust send amount  |  R = refresh  |  Q = quit
 
 local PROTOCOL      = "vault_ui"
 local REFRESH_EVERY = 30
@@ -67,8 +66,7 @@ local function applyFilter()
         local q = searchQuery:lower()
         filtered = {}
         for _, item in ipairs(items) do
-            local label = (item.displayName or item.name):lower()
-            if label:find(q, 1, true) then
+            if (item.displayName or item.name):lower():find(q, 1, true) then
                 table.insert(filtered, item)
             end
         end
@@ -98,20 +96,20 @@ local function doRefresh()
     refreshTimer = os.startTimer(REFRESH_EVERY)
 end
 
-local function sendItem()
+local function sendItem(count)
     local item = filtered[selected]
     if not item or not serverId then return end
-    local cap   = math.min(sendCount, item.count)
-    if cap < 1 then
+    local amt = math.min(count, item.count)
+    if amt < 1 then
         message  = "Out of stock"
         msgTimer = os.clock() + 2
         return
     end
-    rednet.send(serverId, { type="send_item", name=item.name, count=cap, player=localPlayer }, PROTOCOL)
+    rednet.send(serverId, { type="send_item", name=item.name, count=amt, player=localPlayer }, PROTOCOL)
     local _, res = rednet.receive(PROTOCOL, 10)
     local label  = item.displayName or item.name
     if res and res.ok then
-        message  = "Sent x" .. cap .. ": " .. label
+        message  = "Sent x" .. amt .. ": " .. label
         msgTimer = os.clock() + 3
     else
         message  = (res and res.err) or "Failed"
@@ -131,8 +129,8 @@ local function draw()
     term.setTextColor(colors.white)
     term.setCursorPos(1, 1)
     term.clearLine()
-    local curItem   = filtered[selected]
-    local cap       = curItem and math.min(sendCount, curItem.count) or sendCount
+    local curItem    = filtered[selected]
+    local cap        = curItem and math.min(sendCount, curItem.count) or sendCount
     local countLabel = " x" .. cap
     if searchMode then
         local prompt = "/" .. searchQuery
@@ -183,14 +181,14 @@ local function draw()
     if message ~= "" and os.clock() < msgTimer then
         term.setTextColor(colors.lime)
         term.write(message:sub(1, W))
+    elseif searchMode then
+        message = ""
+        term.setTextColor(colors.gray)
+        term.write("Bksp=cancel search  Enter=confirm")
     else
         message = ""
         term.setTextColor(colors.gray)
-        if searchMode then
-            term.write("ESC=cancel  Enter=confirm search")
-        else
-            term.write("/=srch Entr=snd Shft+Scrl=amt R=rfsh")
-        end
+        term.write("R=refresh")
     end
 end
 
@@ -210,7 +208,7 @@ refreshTimer = os.startTimer(REFRESH_EVERY)
 while true do
     draw()
 
-    local event, p1, p2, p3 = os.pullEvent()
+    local event, p1 = os.pullEvent()
 
     if searchMode then
         if event == "char" then
@@ -218,14 +216,16 @@ while true do
             applyFilter()
         elseif event == "key" then
             if p1 == keys.backspace then
-                searchQuery = searchQuery:sub(1, -2)
-                applyFilter()
+                if searchQuery == "" then
+                    -- exit search on backspace when empty
+                    searchMode = false
+                    applyFilter()
+                else
+                    searchQuery = searchQuery:sub(1, -2)
+                    applyFilter()
+                end
             elseif p1 == keys.enter then
                 searchMode = false
-            elseif p1 == keys.escape then
-                searchMode  = false
-                searchQuery = ""
-                applyFilter()
             end
         end
 
@@ -244,7 +244,11 @@ while true do
                     if selected > scroll + (H - 2) then scroll = scroll + 1 end
                 end
             elseif p1 == keys.enter then
-                sendItem()
+                if shiftHeld then
+                    sendItem(64)
+                else
+                    sendItem(sendCount)
+                end
             elseif p1 == keys.r then
                 doRefresh()
                 message  = "Refreshed"
