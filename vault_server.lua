@@ -10,7 +10,7 @@
 local PROTOCOL         = "vault_ui"
 local DELIVERY_VAULT_DIR = "back"   -- side of delivery vault from inventory manager
 
--- ── Configure your source stations here ──────────────────────────────────────
+-- Configure your source stations here
 -- vault:    wired peripheral name of the source vault
 -- buffer:   wired peripheral name of the buffer chest next to the packager
 -- packager: wired peripheral name of the packager
@@ -21,8 +21,6 @@ local SOURCES = {
     { vault="create:item_vault_11", buffer="minecraft:barrel_9",  packager="Create_Packager_2" },
     { vault="create:item_vault_12", buffer="minecraft:barrel_10", packager="Create_Packager_3" },
 }
-
--- ─── Setup ───────────────────────────────────────────────────────────────────
 
 local inv = peripheral.find("inventory_manager")
 if not inv then error("No inventory_manager found on network") end
@@ -40,23 +38,19 @@ end
 if not modemSide then error("No modem found") end
 rednet.open(modemSide)
 
--- ─── State ───────────────────────────────────────────────────────────────────
-
-local pendingItems = {}  -- items sent via frogport waiting to be delivered
-
--- ─── Helpers ─────────────────────────────────────────────────────────────────
+local pendingItems = {}
 
 local function listAllItems()
     local merged = {}
     for _, station in ipairs(SOURCES) do
-        local packager = peripheral.wrap(station.packager)
-        if packager then
-            local ok, items = pcall(packager.list)
+        local vault = peripheral.wrap(station.vault)
+        if vault then
+            local ok, items = pcall(vault.list)
             if ok and type(items) == "table" then
                 for slot, item in pairs(items) do
                     if not merged[item.name] then
                         local detail = nil
-                        pcall(function() detail = packager.getItemDetail(slot) end)
+                        pcall(function() detail = vault.getItemDetail(slot) end)
                         merged[item.name] = {
                             name        = item.name,
                             displayName = (detail and detail.displayName) or item.name,
@@ -75,12 +69,11 @@ local function listAllItems()
 end
 
 local function sendItem(itemName, count)
-    -- Find which station has the item
     local foundStation, foundSlot = nil, nil
     for _, station in ipairs(SOURCES) do
-        local packager = peripheral.wrap(station.packager)
-        if packager then
-            local ok, items = pcall(packager.list)
+        local vault = peripheral.wrap(station.vault)
+        if vault then
+            local ok, items = pcall(vault.list)
             if ok and type(items) == "table" then
                 for slot, item in pairs(items) do
                     if item.name == itemName then
@@ -104,35 +97,27 @@ local function sendItem(itemName, count)
         return false, "Station peripheral missing - check wiring"
     end
 
-    -- Clear the buffer first (pull any leftover items back to vault)
     local bufItems = buffer.list()
     for slot, _ in pairs(bufItems) do
         vault.pullItems(foundStation.buffer, slot)
     end
 
-    -- Pull just the requested item from vault into buffer using known slot
     local moved = buffer.pullItems(foundStation.vault, foundSlot, count)
     if moved == 0 then return false, "Failed to pull item into buffer" end
 
-    -- Wait a tick for packager to register the new items
     sleep(0.1)
 
-    -- Address package to player and fire packager
     packager.setAddress(DELIVERY_ADDRESS)
     local ok, made = pcall(packager.makePackage)
 
     if not (ok and made) then
-        -- Move item back if packaging failed
         buffer.pushItems(foundStation.vault, 1)
         return false, "Package failed"
     end
 
-    -- Queue for delivery loop
     table.insert(pendingItems, { name=itemName, count=moved })
     return true
 end
-
--- ─── Delivery loop (runs every 5 seconds) ────────────────────────────────────
 
 local function deliveryLoop()
     while true do
@@ -148,24 +133,19 @@ local function deliveryLoop()
                 print("Delivered: " .. item.name)
                 table.remove(pendingItems, i)
             else
-                i = i + 1  -- not arrived yet, try again next tick
+                i = i + 1
             end
         end
     end
 end
 
--- ─── Main request loop ───────────────────────────────────────────────────────
-
 local function mainLoop()
     print("Vault server online. Delivery: " .. DELIVERY_ADDRESS)
-
     while true do
         local clientId, msg = rednet.receive(PROTOCOL)
         if type(msg) == "table" then
-
             if msg.type == "list_request" then
                 rednet.send(clientId, { type="list_response", items=listAllItems() }, PROTOCOL)
-
             elseif msg.type == "send_item" then
                 local ok, err = sendItem(msg.name, msg.count or 1)
                 if ok then
@@ -179,7 +159,5 @@ local function mainLoop()
         end
     end
 end
-
--- ─── Run both loops in parallel ──────────────────────────────────────────────
 
 parallel.waitForAny(mainLoop, deliveryLoop)
