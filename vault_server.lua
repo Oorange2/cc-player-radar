@@ -1,11 +1,6 @@
--- Vault Server v5
--- Multi-player: delivery address comes from the client request
+-- Vault Server v6
+-- Multi-player with per-player send queue
 -- Selective item sending via buffer chests + frogport delivery
--- Background delivery loop checks every 5 seconds
---
--- SETUP PER SOURCE STATION:
---   [Vault+Modem] --- [Buffer Chest+Modem] --- [Packager+Modem] --- [Frogport]
---   Run peripheral.getNames() and fill in SOURCES below
 
 local PROTOCOL           = "vault_ui"
 local DELIVERY_VAULT_DIR = "back"
@@ -27,7 +22,8 @@ end
 if not modemSide then error("No modem found") end
 rednet.open(modemSide)
 
-local pendingItems = {}
+local pendingItems = {}  -- frogport delivery queue
+local sendQueue    = {}  -- packaging work queue
 
 local function listAllItems()
     local merged = {}
@@ -58,7 +54,8 @@ local function listAllItems()
 end
 
 local function sendItem(itemName, count, player)
-    local foundStation, foundSlot = nil, nil
+    -- Find item in vault and count available stock
+    local foundStation, foundSlot, available = nil, nil, 0
     for _, station in ipairs(SOURCES) do
         local vault = peripheral.wrap(station.vault)
         if vault then
@@ -66,17 +63,22 @@ local function sendItem(itemName, count, player)
             if ok and type(items) == "table" then
                 for slot, item in pairs(items) do
                     if item.name == itemName then
-                        foundStation = station
-                        foundSlot    = slot
-                        break
+                        available = available + item.count
+                        if not foundStation then
+                            foundStation = station
+                            foundSlot    = slot
+                        end
                     end
                 end
             end
         end
-        if foundStation then break end
     end
 
     if not foundStation then return false, "Item not found in any vault" end
+    if available == 0   then return false, "Out of stock" end
+
+    -- Cap to what actually exists
+    count = math.min(count, available)
 
     local vault    = peripheral.wrap(foundStation.vault)
     local buffer   = peripheral.wrap(foundStation.buffer)
@@ -108,6 +110,26 @@ local function sendItem(itemName, count, player)
     return true
 end
 
+-- ─── Queue processor ─────────────────────────────────────────────────────────
+
+local function processQueue()
+    while true do
+        if #sendQueue > 0 then
+            local req = table.remove(sendQueue, 1)
+            local ok, err = sendItem(req.name, req.count, req.player)
+            if ok then
+                print("Processed: " .. req.name .. " for " .. req.player)
+            else
+                print("Queue failed (" .. req.player .. "): " .. (err or "unknown"))
+            end
+        else
+            sleep(0.05)
+        end
+    end
+end
+
+-- ─── Delivery loop ───────────────────────────────────────────────────────────
+
 local function deliveryLoop()
     while true do
         sleep(5)
@@ -129,27 +151,26 @@ local function deliveryLoop()
     end
 end
 
+-- ─── Main request loop ───────────────────────────────────────────────────────
+
 local function mainLoop()
-    print("Vault server online (multi-player mode)")
+    print("Vault server online (multi-player, queued)")
     while true do
         local clientId, msg = rednet.receive(PROTOCOL)
         if type(msg) == "table" then
+
             if msg.type == "list_request" then
                 rednet.send(clientId, { type="list_response", items=listAllItems() }, PROTOCOL)
 
             elseif msg.type == "send_item" then
                 local player = msg.player or "Player"
-                local ok, err = sendItem(msg.name, msg.count or 1, player)
-                if ok then
-                    rednet.send(clientId, { type="send_result", ok=true, pending=true }, PROTOCOL)
-                    print("Sent to " .. player .. ": " .. msg.name)
-                else
-                    rednet.send(clientId, { type="send_result", ok=false, err=err }, PROTOCOL)
-                    print("Failed (" .. player .. "): " .. (err or "unknown"))
-                end
+                -- Acknowledge immediately, queue the work
+                rednet.send(clientId, { type="send_result", ok=true, pending=true }, PROTOCOL)
+                table.insert(sendQueue, { name=msg.name, count=msg.count or 1, player=player })
+                print("Queued: " .. msg.name .. " for " .. player .. " (queue size: " .. #sendQueue .. ")")
             end
         end
     end
 end
 
-parallel.waitForAny(mainLoop, deliveryLoop)
+parallel.waitForAny(mainLoop, deliveryLoop, processQueue)
