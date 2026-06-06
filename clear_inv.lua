@@ -1,14 +1,14 @@
 local inv = peripheral.wrap("left")
 if not inv then error("No inventory_manager on left") end
 
-local PLAYER = "cypu001"
+local PLAYER = "Ooranges"
 
 print("Clearing " .. PLAYER .. "s inventory...")
 
 local items = inv.getItems(PLAYER)
 for _, item in pairs(items) do
     if item.name and item.name ~= "minecraft:air" then
-        inv.removeItemFromPlayer(PLAYER, {name=item.name, count=item.count})
+        inv.removeItemFromPlayer(PLAYER, {slot=item.slot, count=item.count})
     end
 end
 
