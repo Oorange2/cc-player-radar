@@ -1,4 +1,4 @@
--- Vault Client v9
+-- Vault Client v10
 -- / = search  |  Shift+Scroll = adjust send amount  |  R = refresh  |  Q = quit
 
 local PROTOCOL      = "vault_ui"
@@ -29,19 +29,20 @@ if localPlayer == "" then localPlayer = "Player" end
 
 -- ─── State ───────────────────────────────────────────────────────────────────
 
-local W, H         = term.getSize()
-local items        = {}
-local filtered     = {}
-local selected     = 1
-local scroll       = 0
-local serverId     = nil
-local message      = ""
-local msgTimer     = 0
-local shiftHeld    = false
-local sendCount    = 1
-local refreshTimer = nil
-local searchMode   = false
-local searchQuery  = ""
+local W, H              = term.getSize()
+local items             = {}
+local filtered          = {}
+local selected          = 1
+local scroll            = 0
+local serverId          = nil
+local message           = ""
+local msgTimer          = 0
+local shiftHeld         = false
+local sendCount         = 1
+local refreshTimer      = nil
+local sendRefreshTimer  = nil
+local searchMode        = false
+local searchQuery       = ""
 
 -- ─── Item icon colors ────────────────────────────────────────────────────────
 
@@ -57,10 +58,10 @@ local function itemColor(name)
     return iconColors[h + 1]
 end
 
--- ─── Filter (preserves selected item across refreshes) ───────────────────────
+-- ─── Filter ──────────────────────────────────────────────────────────────────
 
-local function applyFilter(preserveName)
-    local prevName = preserveName or (filtered[selected] and filtered[selected].name)
+local function applyFilter()
+    local prevName = filtered[selected] and filtered[selected].name
     if searchQuery == "" then
         filtered = items
     else
@@ -72,12 +73,10 @@ local function applyFilter(preserveName)
             end
         end
     end
-    -- Try to keep the same item selected
     if prevName then
         for i, item in ipairs(filtered) do
             if item.name == prevName then
                 selected = i
-                -- Adjust scroll to keep selection visible
                 if selected <= scroll then
                     scroll = selected - 1
                 elseif selected > scroll + (H - 2) then
@@ -113,6 +112,7 @@ local function doRefresh()
 end
 
 local function sendItem(count)
+    shiftHeld = false  -- clear immediately so closing after shift+enter can't get stuck
     local item = filtered[selected]
     if not item or not serverId then return end
     local amt = math.min(count, item.count)
@@ -131,8 +131,8 @@ local function sendItem(count)
         message  = (res and res.err) or "Failed"
         msgTimer = os.clock() + 3
     end
-    -- Don't refresh immediately — server queues the work so the vault
-    -- still shows the item until packaging completes. Periodic timer handles it.
+    -- Refresh after 1s so packaging has time to run before we re-list
+    sendRefreshTimer = os.startTimer(1)
 end
 
 -- ─── Draw ────────────────────────────────────────────────────────────────────
@@ -141,7 +141,6 @@ local function draw()
     term.setBackgroundColor(colors.black)
     term.clear()
 
-    -- Header
     term.setBackgroundColor(colors.blue)
     term.setTextColor(colors.white)
     term.setCursorPos(1, 1)
@@ -159,13 +158,11 @@ local function draw()
         term.write(header .. string.rep(" ", math.max(0, pad)) .. countLabel)
     end
 
-    -- Item list
     local listH = H - 2
     for row = 1, listH do
         local idx  = row + scroll
         local item = filtered[idx]
         term.setCursorPos(1, row + 1)
-
         if item then
             local isSel  = idx == selected
             local nameBg = isSel and colors.gray  or colors.black
@@ -192,7 +189,6 @@ local function draw()
         end
     end
 
-    -- Footer
     term.setCursorPos(1, H)
     term.setBackgroundColor(colors.black)
     if message ~= "" and os.clock() < msgTimer then
@@ -302,8 +298,13 @@ while true do
                 end
             end
 
-        elseif event == "timer" and p1 == refreshTimer then
-            doRefresh()
+        elseif event == "timer" then
+            if p1 == refreshTimer then
+                doRefresh()
+            elseif p1 == sendRefreshTimer then
+                sendRefreshTimer = nil
+                doRefresh()
+            end
         end
     end
 end
