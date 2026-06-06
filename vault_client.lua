@@ -1,34 +1,44 @@
--- AeroShields Vault Client
--- Runs on pocket computer with ender modem attached
--- Up/Down to browse, Enter to send item to yourself, R to refresh, Q to quit
+-- AeroShields Vault Client v3
+-- Up/Down or scroll wheel to browse
+-- Enter = send 1  |  Shift+Enter = send stack (64)
+-- R = refresh  |  Q = quit
 
 local PROTOCOL = "vault_ui"
 
 -- Open ender modem
 local modemSide = nil
 for _, side in ipairs({"top","bottom","left","right","front","back"}) do
-    if peripheral.getType(side) == "modem" then
-        modemSide = side
-        break
-    end
+    if peripheral.getType(side) == "modem" then modemSide = side break end
 end
-if not modemSide then error("No ender modem found on pocket computer") end
+if not modemSide then error("No ender modem on pocket computer") end
 rednet.open(modemSide)
 
-local W, H     = term.getSize()
-local items    = {}
-local selected = 1
-local scroll   = 0
-local serverId = nil
-local message  = ""
-local msgTimer = 0
+local W, H      = term.getSize()
+local items     = {}
+local selected  = 1
+local scroll    = 0
+local serverId  = nil
+local message   = ""
+local msgTimer  = 0
+local shiftHeld = false
+
+-- ─── Item icon colors (deterministic per item name) ──────────────────────────
+
+local iconColors = {
+    colors.orange, colors.magenta, colors.lightBlue, colors.yellow,
+    colors.lime,   colors.pink,    colors.cyan,      colors.purple,
+    colors.blue,   colors.brown,   colors.green,     colors.red,
+}
+
+local function itemColor(name)
+    local h = 0
+    for i = 1, #name do h = (h * 31 + string.byte(name, i)) % #iconColors end
+    return iconColors[h + 1]
+end
+
+-- ─── Network ─────────────────────────────────────────────────────────────────
 
 local function fetch()
-    term.setBackgroundColor(colors.black)
-    term.setTextColor(colors.gray)
-    term.setCursorPos(1, H)
-    term.clearLine()
-    term.write("Connecting...")
     rednet.broadcast({ type = "list_request" }, PROTOCOL)
     local id, msg = rednet.receive(PROTOCOL, 5)
     if msg and msg.type == "list_response" then
@@ -37,6 +47,23 @@ local function fetch()
     end
     return nil
 end
+
+local function sendItem(count)
+    local item = items[selected]
+    if not item or not serverId then return end
+    rednet.send(serverId, { type="send_item", name=item.name, count=count }, PROTOCOL)
+    local _, res = rednet.receive(PROTOCOL, 10)
+    local label  = item.displayName or item.name
+    if res and res.ok then
+        message  = (res.pending and "Sent: " or "Delivered: ") .. label
+        msgTimer = os.clock() + 3
+    else
+        message  = (res and res.err) or "Failed"
+        msgTimer = os.clock() + 3
+    end
+end
+
+-- ─── Draw ────────────────────────────────────────────────────────────────────
 
 local function draw()
     term.setBackgroundColor(colors.black)
@@ -47,31 +74,41 @@ local function draw()
     term.setTextColor(colors.white)
     term.setCursorPos(1, 1)
     term.clearLine()
-    term.write(" Vault  [" .. #items .. " items]")
+    term.write(" Vault [" .. #items .. "]" .. (shiftHeld and " STACK" or ""))
 
-    -- List
+    -- Item list
     local listH = H - 2
     for row = 1, listH do
         local idx  = row + scroll
         local item = items[idx]
         term.setCursorPos(1, row + 1)
-        term.clearLine()
+
         if item then
-            if idx == selected then
-                term.setBackgroundColor(colors.gray)
-                term.setTextColor(colors.yellow)
-            else
-                term.setBackgroundColor(colors.black)
-                term.setTextColor(colors.white)
-            end
-            local label = item.displayName or item.name
-            local count = "x" .. item.count
-            local pad   = W - #label - #count - 1
-            if pad < 0 then
-                label = label:sub(1, W - #count - 2)
-                pad   = 1
-            end
-            term.write(label .. string.rep(" ", pad) .. count)
+            local isSel = idx == selected
+            local nameBg = isSel and colors.gray  or colors.black
+            local nameFg = isSel and colors.yellow or colors.white
+
+            -- 2-char colored icon block
+            term.setBackgroundColor(itemColor(item.name))
+            term.setTextColor(colors.black)
+            term.write("  ")
+
+            -- Item name (truncated to fit)
+            local countStr = "x" .. item.count
+            local maxName  = W - 3 - #countStr
+            local label    = (item.displayName or item.name):sub(1, maxName)
+            term.setBackgroundColor(nameBg)
+            term.setTextColor(nameFg)
+            term.write(" " .. label)
+
+            -- Right-align count in cyan
+            local filled = 2 + 1 + #label
+            local pad    = math.max(0, W - filled - #countStr)
+            term.setTextColor(colors.cyan)
+            term.write(string.rep(" ", pad) .. countStr)
+        else
+            term.setBackgroundColor(colors.black)
+            term.write(string.rep(" ", W))
         end
     end
 
@@ -84,76 +121,70 @@ local function draw()
     else
         message = ""
         term.setTextColor(colors.gray)
-        term.write("Enter=Get  R=Refresh  Q=Quit")
+        term.write("Entr=1 Shft+Entr=64 R=rfsh Q=quit")
     end
 end
 
--- Initial fetch
+-- ─── Main ────────────────────────────────────────────────────────────────────
+
+term.clear()
+term.setCursorPos(1, 1)
+print("Connecting...")
 items = fetch()
 if not items then
-    term.setBackgroundColor(colors.black)
-    term.setTextColor(colors.red)
-    term.setCursorPos(1,1)
-    term.clear()
-    print("Server not found.")
-    print("Is vault_server running?")
+    print("Server not found!")
     return
 end
 
 while true do
     draw()
 
-    local event, key = os.pullEvent("key")
+    local event, p1, p2, p3 = os.pullEvent()
 
-    if key == keys.up then
-        if selected > 1 then
-            selected = selected - 1
-            if selected <= scroll then scroll = scroll - 1 end
+    if event == "key" then
+        if     p1 == keys.leftShift or p1 == keys.rightShift then
+            shiftHeld = true
+        elseif p1 == keys.up then
+            if selected > 1 then
+                selected = selected - 1
+                if selected <= scroll then scroll = scroll - 1 end
+            end
+        elseif p1 == keys.down then
+            if selected < #items then
+                selected = selected + 1
+                if selected > scroll + (H - 2) then scroll = scroll + 1 end
+            end
+        elseif p1 == keys.enter then
+            sendItem(shiftHeld and 64 or 1)
+        elseif p1 == keys.r then
+            local fresh = fetch()
+            if fresh then
+                items    = fresh
+                selected = math.min(selected, math.max(1, #items))
+                message  = "Refreshed"
+                msgTimer = os.clock() + 1
+            else
+                message  = "Server not responding"
+                msgTimer = os.clock() + 2
+            end
+        elseif p1 == keys.q then
+            break
         end
 
-    elseif key == keys.down then
-        if selected < #items then
+    elseif event == "key_up" then
+        if p1 == keys.leftShift or p1 == keys.rightShift then
+            shiftHeld = false
+        end
+
+    elseif event == "mouse_scroll" then
+        -- p1: -1 = scroll up, 1 = scroll down
+        if p1 == -1 and selected > 1 then
+            selected = selected - 1
+            if selected <= scroll then scroll = scroll - 1 end
+        elseif p1 == 1 and selected < #items then
             selected = selected + 1
             if selected > scroll + (H - 2) then scroll = scroll + 1 end
         end
-
-    elseif key == keys.enter then
-        local item = items[selected]
-        if item and serverId then
-            rednet.send(serverId, {
-                type  = "send_item",
-                name  = item.name,
-                count = 1,
-            }, PROTOCOL)
-            local _, res = rednet.receive(PROTOCOL, 10)
-            if res and res.ok then
-                if res.pending then
-                    message = "On its way: " .. (item.displayName or item.name)
-                else
-                    message = "Delivered: " .. (item.displayName or item.name)
-                end
-                msgTimer = os.clock() + 3
-            else
-                message  = (res and res.err) or "Failed - no response"
-                msgTimer = os.clock() + 3
-            end
-        end
-
-    elseif key == keys.r then
-        local fresh = fetch()
-        if fresh then
-            items    = fresh
-            selected = math.min(selected, #items)
-            scroll   = math.max(0, selected - (H - 2))
-            message  = "Refreshed"
-            msgTimer = os.clock() + 1
-        else
-            message  = "Server not responding"
-            msgTimer = os.clock() + 2
-        end
-
-    elseif key == keys.q then
-        break
     end
 end
 

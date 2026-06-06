@@ -114,6 +114,9 @@ local function sendItem(itemName, count)
     local moved = vault.pushItems(foundStation.buffer, foundSlot, count)
     if moved == 0 then return false, "Failed to move item to buffer" end
 
+    -- Wait a tick for packager to register the new items
+    sleep(0.1)
+
     -- Address package to player and fire packager
     packager.setAddress(DELIVERY_ADDRESS)
     local ok, made = pcall(packager.makePackage)
