@@ -6,8 +6,8 @@
 --   VAULT_INV_DIR  = side of vault relative to the inventory manager block
 
 local PROTOCOL    = "vault_ui"
-local VAULT_SIDE  = "right"   -- change to whichever side the vault is on
-local VAULT_INV_DIR = "left"  -- direction of vault from the inventory manager
+local VAULT_SIDE    = "back"  -- vault is on the back of the computer
+local VAULT_INV_DIR = "back"  -- vault is on the back of the inventory manager
 
 local inv   = peripheral.wrap("left")   -- inventory manager side
 local vault = peripheral.wrap(VAULT_SIDE)
