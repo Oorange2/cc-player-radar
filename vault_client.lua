@@ -1,8 +1,8 @@
--- Vault Client v7
+-- Vault Client v8
 -- / = search  |  Shift+Scroll = adjust send amount  |  R = refresh  |  Q = quit
 
 local PROTOCOL      = "vault_ui"
-local REFRESH_EVERY = 30
+local REFRESH_EVERY = 15
 
 local modemSide = nil
 for _, side in ipairs({"top","bottom","left","right","front","back"}) do
@@ -210,6 +210,12 @@ while true do
 
     local event, p1 = os.pullEvent()
 
+    -- Reset shift if the GUI was closed and reopened (term_resize fires on reopen)
+    if event == "term_resize" then
+        shiftHeld = false
+        W, H = term.getSize()
+    end
+
     if searchMode then
         if event == "char" then
             searchQuery = searchQuery .. p1
@@ -217,7 +223,6 @@ while true do
         elseif event == "key" then
             if p1 == keys.backspace then
                 if searchQuery == "" then
-                    -- exit search on backspace when empty
                     searchMode = false
                     applyFilter()
                 else
@@ -268,7 +273,7 @@ while true do
 
         elseif event == "mouse_scroll" then
             if shiftHeld then
-                local curItem = filtered[selected]
+                local curItem  = filtered[selected]
                 local maxCount = curItem and curItem.count or 9999
                 sendCount = math.max(1, math.min(sendCount - p1, maxCount))
             else
