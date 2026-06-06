@@ -1,17 +1,34 @@
--- AeroShields Vault Client v3
--- Up/Down or scroll wheel to browse
--- Enter = send 1  |  Shift+Enter = send stack (64)
--- R = refresh  |  Q = quit
+-- Vault Client v5
+-- Up/Down or scroll to browse  |  Shift+Scroll = adjust send amount
+-- Enter = send  |  R = refresh  |  Q = quit
 
-local PROTOCOL = "vault_ui"
+local PROTOCOL      = "vault_ui"
+local REFRESH_EVERY = 30  -- seconds
 
--- Open ender modem
 local modemSide = nil
 for _, side in ipairs({"top","bottom","left","right","front","back"}) do
     if peripheral.getType(side) == "modem" then modemSide = side break end
 end
 if not modemSide then error("No ender modem on pocket computer") end
 rednet.open(modemSide)
+
+-- ─── Login ───────────────────────────────────────────────────────────────────
+
+term.setBackgroundColor(colors.black)
+term.setTextColor(colors.white)
+term.clear()
+term.setCursorPos(1, 1)
+term.setBackgroundColor(colors.blue)
+term.setTextColor(colors.white)
+term.clearLine()
+term.write(" Vault Login")
+term.setBackgroundColor(colors.black)
+term.setCursorPos(1, 3)
+term.write("Username: ")
+local localPlayer = read()
+if localPlayer == "" then localPlayer = "Player" end
+
+-- ─── State ───────────────────────────────────────────────────────────────────
 
 local W, H      = term.getSize()
 local items     = {}
@@ -21,8 +38,10 @@ local serverId  = nil
 local message   = ""
 local msgTimer  = 0
 local shiftHeld = false
+local sendCount = 1
+local refreshTimer = nil
 
--- ─── Item icon colors (deterministic per item name) ──────────────────────────
+-- ─── Item icon colors ────────────────────────────────────────────────────────
 
 local iconColors = {
     colors.orange, colors.magenta, colors.lightBlue, colors.yellow,
@@ -39,7 +58,7 @@ end
 -- ─── Network ─────────────────────────────────────────────────────────────────
 
 local function fetch()
-    rednet.broadcast({ type = "list_request" }, PROTOCOL)
+    rednet.broadcast({ type="list_request", player=localPlayer }, PROTOCOL)
     local id, msg = rednet.receive(PROTOCOL, 5)
     if msg and msg.type == "list_response" then
         serverId = id
@@ -48,19 +67,29 @@ local function fetch()
     return nil
 end
 
-local function sendItem(count)
+local function doRefresh()
+    local fresh = fetch()
+    if fresh then
+        items    = fresh
+        selected = math.min(selected, math.max(1, #items))
+    end
+    refreshTimer = os.startTimer(REFRESH_EVERY)
+end
+
+local function sendItem()
     local item = items[selected]
     if not item or not serverId then return end
-    rednet.send(serverId, { type="send_item", name=item.name, count=count }, PROTOCOL)
+    rednet.send(serverId, { type="send_item", name=item.name, count=sendCount, player=localPlayer }, PROTOCOL)
     local _, res = rednet.receive(PROTOCOL, 10)
     local label  = item.displayName or item.name
     if res and res.ok then
-        message  = (res.pending and "Sent: " or "Delivered: ") .. label
+        message  = "Sent x" .. sendCount .. ": " .. label
         msgTimer = os.clock() + 3
     else
         message  = (res and res.err) or "Failed"
         msgTimer = os.clock() + 3
     end
+    doRefresh()
 end
 
 -- ─── Draw ────────────────────────────────────────────────────────────────────
@@ -74,7 +103,10 @@ local function draw()
     term.setTextColor(colors.white)
     term.setCursorPos(1, 1)
     term.clearLine()
-    term.write(" Vault [" .. #items .. "]" .. (shiftHeld and " STACK" or ""))
+    local header = " " .. localPlayer .. " [" .. #items .. "]"
+    local countLabel = " x" .. sendCount
+    local pad = W - #header - #countLabel
+    term.write(header .. string.rep(" ", math.max(0, pad)) .. countLabel)
 
     -- Item list
     local listH = H - 2
@@ -84,16 +116,14 @@ local function draw()
         term.setCursorPos(1, row + 1)
 
         if item then
-            local isSel = idx == selected
+            local isSel  = idx == selected
             local nameBg = isSel and colors.gray  or colors.black
             local nameFg = isSel and colors.yellow or colors.white
 
-            -- 2-char colored icon block
             term.setBackgroundColor(itemColor(item.name))
             term.setTextColor(colors.black)
             term.write("  ")
 
-            -- Item name (truncated to fit)
             local countStr = "x" .. item.count
             local maxName  = W - 3 - #countStr
             local label    = (item.displayName or item.name):sub(1, maxName)
@@ -101,11 +131,10 @@ local function draw()
             term.setTextColor(nameFg)
             term.write(" " .. label)
 
-            -- Right-align count in cyan
             local filled = 2 + 1 + #label
-            local pad    = math.max(0, W - filled - #countStr)
+            local rpad   = math.max(0, W - filled - #countStr)
             term.setTextColor(colors.cyan)
-            term.write(string.rep(" ", pad) .. countStr)
+            term.write(string.rep(" ", rpad) .. countStr)
         else
             term.setBackgroundColor(colors.black)
             term.write(string.rep(" ", W))
@@ -121,7 +150,7 @@ local function draw()
     else
         message = ""
         term.setTextColor(colors.gray)
-        term.write("Entr=1 Shft+Entr=64 R=rfsh Q=quit")
+        term.write("Entr=snd Shft+Scrl=amt R=rfsh Q=quit")
     end
 end
 
@@ -135,6 +164,7 @@ if not items then
     print("Server not found!")
     return
 end
+refreshTimer = os.startTimer(REFRESH_EVERY)
 
 while true do
     draw()
@@ -142,7 +172,7 @@ while true do
     local event, p1, p2, p3 = os.pullEvent()
 
     if event == "key" then
-        if     p1 == keys.leftShift or p1 == keys.rightShift then
+        if p1 == keys.leftShift or p1 == keys.rightShift then
             shiftHeld = true
         elseif p1 == keys.up then
             if selected > 1 then
@@ -155,18 +185,11 @@ while true do
                 if selected > scroll + (H - 2) then scroll = scroll + 1 end
             end
         elseif p1 == keys.enter then
-            sendItem(shiftHeld and 64 or 1)
+            sendItem()
         elseif p1 == keys.r then
-            local fresh = fetch()
-            if fresh then
-                items    = fresh
-                selected = math.min(selected, math.max(1, #items))
-                message  = "Refreshed"
-                msgTimer = os.clock() + 1
-            else
-                message  = "Server not responding"
-                msgTimer = os.clock() + 2
-            end
+            doRefresh()
+            message  = "Refreshed"
+            msgTimer = os.clock() + 1
         elseif p1 == keys.q then
             break
         end
@@ -177,14 +200,21 @@ while true do
         end
 
     elseif event == "mouse_scroll" then
-        -- p1: -1 = scroll up, 1 = scroll down
-        if p1 == -1 and selected > 1 then
-            selected = selected - 1
-            if selected <= scroll then scroll = scroll - 1 end
-        elseif p1 == 1 and selected < #items then
-            selected = selected + 1
-            if selected > scroll + (H - 2) then scroll = scroll + 1 end
+        if shiftHeld then
+            -- adjust send count
+            sendCount = math.max(1, sendCount + p1)
+        else
+            if p1 == -1 and selected > 1 then
+                selected = selected - 1
+                if selected <= scroll then scroll = scroll - 1 end
+            elseif p1 == 1 and selected < #items then
+                selected = selected + 1
+                if selected > scroll + (H - 2) then scroll = scroll + 1 end
+            end
         end
+
+    elseif event == "timer" and p1 == refreshTimer then
+        doRefresh()
     end
 end
 
