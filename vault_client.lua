@@ -125,13 +125,17 @@ while true do
                 name  = item.name,
                 count = 1,
             }, PROTOCOL)
-            local _, res = rednet.receive(PROTOCOL, 5)
-            if res and res.count and res.count > 0 then
-                message  = "Sent: " .. (item.displayName or item.name)
-                msgTimer = os.clock() + 2
+            local _, res = rednet.receive(PROTOCOL, 10)
+            if res and res.ok then
+                if res.pending then
+                    message = "On its way: " .. (item.displayName or item.name)
+                else
+                    message = "Delivered: " .. (item.displayName or item.name)
+                end
+                msgTimer = os.clock() + 3
             else
-                message  = "Failed - check vault/manager"
-                msgTimer = os.clock() + 2
+                message  = (res and res.err) or "Failed - no response"
+                msgTimer = os.clock() + 3
             end
         end
 
