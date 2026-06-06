@@ -1,19 +1,14 @@
--- AeroShields Vault Server v4
+-- Vault Server v5
+-- Multi-player: delivery address comes from the client request
 -- Selective item sending via buffer chests + frogport delivery
 -- Background delivery loop checks every 5 seconds
 --
 -- SETUP PER SOURCE STATION:
 --   [Vault+Modem] --- [Buffer Chest+Modem] --- [Packager+Modem] --- [Frogport]
---   Packager reads from buffer chest, NOT the vault directly
 --   Run peripheral.getNames() and fill in SOURCES below
 
-local PROTOCOL         = "vault_ui"
-local DELIVERY_VAULT_DIR = "back"   -- side of delivery vault from inventory manager
-
--- Configure your source stations here
--- vault:    wired peripheral name of the source vault
--- buffer:   wired peripheral name of the buffer chest next to the packager
--- packager: wired peripheral name of the packager
+local PROTOCOL           = "vault_ui"
+local DELIVERY_VAULT_DIR = "back"
 
 local SOURCES = {
     { vault="create:item_vault_9",  buffer="minecraft:barrel_7",  packager="Create_Packager_1" },
@@ -24,12 +19,6 @@ local SOURCES = {
 
 local inv = peripheral.find("inventory_manager")
 if not inv then error("No inventory_manager found on network") end
-
-local DELIVERY_ADDRESS = inv.getOwner()
-if not DELIVERY_ADDRESS then
-    error("No memory card in inventory manager - insert one linked to a player")
-end
-print("Delivery address: " .. DELIVERY_ADDRESS)
 
 local modemSide = nil
 for _, side in ipairs({"top","bottom","left","right","front","back"}) do
@@ -68,7 +57,7 @@ local function listAllItems()
     return list
 end
 
-local function sendItem(itemName, count)
+local function sendItem(itemName, count, player)
     local foundStation, foundSlot = nil, nil
     for _, station in ipairs(SOURCES) do
         local vault = peripheral.wrap(station.vault)
@@ -107,7 +96,7 @@ local function sendItem(itemName, count)
 
     sleep(0.1)
 
-    packager.setAddress(DELIVERY_ADDRESS)
+    packager.setAddress(player)
     local ok, made = pcall(packager.makePackage)
 
     if not (ok and made) then
@@ -115,7 +104,7 @@ local function sendItem(itemName, count)
         return false, "Package failed"
     end
 
-    table.insert(pendingItems, { name=itemName, count=moved })
+    table.insert(pendingItems, { name=itemName, count=moved, player=player })
     return true
 end
 
@@ -127,10 +116,11 @@ local function deliveryLoop()
             local item = pendingItems[i]
             local ok, result = pcall(
                 inv.addItemToPlayer, DELIVERY_VAULT_DIR,
-                { name=item.name, count=item.count }
+                { name=item.name, count=item.count },
+                item.player
             )
             if ok and type(result) == "number" and result > 0 then
-                print("Delivered: " .. item.name)
+                print("Delivered to " .. item.player .. ": " .. item.name)
                 table.remove(pendingItems, i)
             else
                 i = i + 1
@@ -140,20 +130,22 @@ local function deliveryLoop()
 end
 
 local function mainLoop()
-    print("Vault server online. Delivery: " .. DELIVERY_ADDRESS)
+    print("Vault server online (multi-player mode)")
     while true do
         local clientId, msg = rednet.receive(PROTOCOL)
         if type(msg) == "table" then
             if msg.type == "list_request" then
                 rednet.send(clientId, { type="list_response", items=listAllItems() }, PROTOCOL)
+
             elseif msg.type == "send_item" then
-                local ok, err = sendItem(msg.name, msg.count or 1)
+                local player = msg.player or "Player"
+                local ok, err = sendItem(msg.name, msg.count or 1, player)
                 if ok then
                     rednet.send(clientId, { type="send_result", ok=true, pending=true }, PROTOCOL)
-                    print("Sent: " .. msg.name .. " (awaiting frogport delivery)")
+                    print("Sent to " .. player .. ": " .. msg.name)
                 else
                     rednet.send(clientId, { type="send_result", ok=false, err=err }, PROTOCOL)
-                    print("Failed: " .. (err or "unknown"))
+                    print("Failed (" .. player .. "): " .. (err or "unknown"))
                 end
             end
         end
