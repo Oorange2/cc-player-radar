@@ -1,74 +1,182 @@
--- AeroShields Vault Server
--- Reads vault contents and handles item requests from pocket computer
+-- AeroShields Vault Server v2
+-- Uses Create packagers to browse vaults and send items to player
 --
 -- SETUP:
---   VAULT_SIDE     = side of vault relative to THIS computer
---   VAULT_INV_DIR  = side of vault relative to the inventory manager block
+--   Source side:   each vault has a Packager attached, all wired to this computer
+--   Delivery side: one Packager attached to a delivery vault, wired to this computer
+--                  Inventory Manager adjacent to delivery vault, wired to this computer
+--
+-- Set DELIVERY_ADDRESS to match the address written on your delivery packager's sign
+-- Set DELIVERY_VAULT_DIR to the side of the delivery vault relative to the inventory manager
 
-local PROTOCOL    = "vault_ui"
-local VAULT_SIDE    = "back"  -- vault is on the back of the computer
-local VAULT_INV_DIR = "back"  -- vault is on the back of the inventory manager
+local PROTOCOL         = "vault_ui"
+local DELIVERY_ADDRESS = "delivery"   -- address of the delivery packager
+local DELIVERY_VAULT_DIR = "back"     -- side of delivery vault from inventory manager
+local INV_MANAGER_SIDE   = "left"     -- side inventory manager is on
 
-local inv   = peripheral.wrap("left")   -- inventory manager side
-local vault = peripheral.wrap(VAULT_SIDE)
+-- ─── Setup ──────────────────────────────────────────────────────────────────
 
-if not inv   then error("No inventory_manager found") end
-if not vault then error("No vault found on " .. VAULT_SIDE) end
+local inv = peripheral.wrap(INV_MANAGER_SIDE)
+if not inv then error("No inventory_manager on " .. INV_MANAGER_SIDE) end
 
 -- Open ender modem
 local modemSide = nil
 for _, side in ipairs({"top","bottom","left","right","front","back"}) do
-    if peripheral.getType(side) == "modem" and side ~= "left" and side ~= VAULT_SIDE then
+    if peripheral.getType(side) == "modem" and side ~= INV_MANAGER_SIDE then
         modemSide = side
         break
     end
 end
-if not modemSide then error("No ender modem found") end
+if not modemSide then error("No modem found") end
 rednet.open(modemSide)
 
-print("Vault server online. Listening...")
-
-local function getVaultItems()
-    local merged = {}
-    local raw    = vault.list()
-    for _, item in pairs(raw) do
-        local found = false
-        for _, entry in ipairs(merged) do
-            if entry.name == item.name then
-                entry.count = entry.count + item.count
-                found = true
-                break
-            end
-        end
-        if not found then
-            table.insert(merged, {
-                name        = item.name,
-                displayName = item.displayName or item.name,
-                count       = item.count,
-            })
+-- Find all packagers on the network
+local function getPackagers()
+    local packagers = {}
+    for _, name in ipairs(peripheral.getNames()) do
+        if peripheral.getType(name) == "create:packager" then
+            packagers[name] = peripheral.wrap(name)
         end
     end
-    table.sort(merged, function(a, b) return a.displayName < b.displayName end)
-    return merged
+    return packagers
 end
 
+-- Find the delivery packager by address
+local function getDeliveryPackager(packagers)
+    for name, p in pairs(packagers) do
+        local ok, addr = pcall(p.getAddress)
+        if ok and addr == DELIVERY_ADDRESS then
+            return name, p
+        end
+    end
+    return nil, nil
+end
+
+-- List all items across all source packagers, merged by item name
+local function listAllItems(packagers, deliveryName)
+    local merged = {}  -- name -> {displayName, count, sources={packager,slot,count}}
+
+    for name, p in pairs(packagers) do
+        if name ~= deliveryName then
+            local ok, items = pcall(p.list)
+            if ok and type(items) == "table" then
+                for slot, item in pairs(items) do
+                    if not merged[item.name] then
+                        -- Get display name from detail
+                        local detail = nil
+                        pcall(function() detail = p.getItemDetail(slot) end)
+                        merged[item.name] = {
+                            name        = item.name,
+                            displayName = (detail and detail.displayName) or item.name,
+                            count       = 0,
+                            sources     = {}
+                        }
+                    end
+                    merged[item.name].count = merged[item.name].count + item.count
+                    table.insert(merged[item.name].sources, {
+                        packager = name,
+                        slot     = slot,
+                        count    = item.count
+                    })
+                end
+            end
+        end
+    end
+
+    -- Convert to sorted list
+    local list = {}
+    for _, v in pairs(merged) do table.insert(list, v) end
+    table.sort(list, function(a, b) return a.displayName < b.displayName end)
+    return list
+end
+
+-- ─── Main loop ──────────────────────────────────────────────────────────────
+
+print("Vault server online.")
+print("Delivery address: " .. DELIVERY_ADDRESS)
+print("Scanning packagers...")
+
 while true do
-    local senderId, msg = rednet.receive(PROTOCOL)
+    local packagers                   = getPackagers()
+    local deliveryName, deliveryPack  = getDeliveryPackager(packagers)
+
+    if not deliveryName then
+        print("Warning: delivery packager '" .. DELIVERY_ADDRESS .. "' not found")
+    end
+
+    print("Found " .. (function()
+        local n = 0
+        for _ in pairs(packagers) do n = n + 1 end
+        return n
+    end)() .. " packager(s)")
+
+    local clientId, msg = rednet.receive(PROTOCOL)
     if type(msg) == "table" then
 
+        -- ── List request ─────────────────────────────────────────────────────
         if msg.type == "list_request" then
-            local items = getVaultItems()
-            rednet.send(senderId, { type = "list_response", items = items }, PROTOCOL)
+            packagers    = getPackagers()
+            deliveryName, deliveryPack = getDeliveryPackager(packagers)
+            local items  = listAllItems(packagers, deliveryName)
+            rednet.send(clientId, { type = "list_response", items = items }, PROTOCOL)
 
+        -- ── Send item request ─────────────────────────────────────────────────
         elseif msg.type == "send_item" then
-            local ok, result = pcall(
-                inv.addItemToPlayer, VAULT_INV_DIR,
-                { name = msg.name, count = msg.count or 1 }
-            )
-            rednet.send(senderId, {
-                type  = "send_result",
-                count = ok and result or 0,
-            }, PROTOCOL)
+            packagers    = getPackagers()
+            deliveryName, deliveryPack = getDeliveryPackager(packagers)
+
+            if not deliveryName then
+                rednet.send(clientId, { type="send_result", ok=false, err="No delivery packager found" }, PROTOCOL)
+            else
+                -- Find a source packager that has this item
+                local sourcePackager = nil
+                for name, p in pairs(packagers) do
+                    if name ~= deliveryName then
+                        local ok, items = pcall(p.list)
+                        if ok then
+                            for _, item in pairs(items) do
+                                if item.name == msg.name then
+                                    sourcePackager = p
+                                    break
+                                end
+                            end
+                        end
+                    end
+                    if sourcePackager then break end
+                end
+
+                if not sourcePackager then
+                    rednet.send(clientId, { type="send_result", ok=false, err="Item not found in any vault" }, PROTOCOL)
+                else
+                    -- Set address and send package
+                    sourcePackager.setAddress(DELIVERY_ADDRESS)
+                    local ok, made = pcall(sourcePackager.makePackage)
+
+                    if ok and made then
+                        -- Wait for delivery packager to receive package
+                        local received = false
+                        local timeout  = os.startTimer(10)
+                        while not received do
+                            local e, p1 = os.pullEvent()
+                            if e == "create:package_received" then
+                                received = true
+                            elseif e == "timer" and p1 == timeout then
+                                break
+                            end
+                        end
+
+                        if received then
+                            -- Give item to player via inventory manager
+                            local result = inv.addItemToPlayer(DELIVERY_VAULT_DIR, { name=msg.name, count=msg.count or 1 })
+                            rednet.send(clientId, { type="send_result", ok=true, count=result }, PROTOCOL)
+                        else
+                            rednet.send(clientId, { type="send_result", ok=false, err="Package delivery timed out" }, PROTOCOL)
+                        end
+                    else
+                        rednet.send(clientId, { type="send_result", ok=false, err="Failed to create package" }, PROTOCOL)
+                    end
+                end
+            end
         end
     end
 end
