@@ -35,11 +35,12 @@ end
 if not modemSide then error("No modem found") end
 rednet.open(modemSide)
 
--- Find all packagers on the network
+-- Find all packagers on the network (matches any type containing "packager")
 local function getPackagers()
     local packagers = {}
     for _, name in ipairs(peripheral.getNames()) do
-        if peripheral.getType(name) == "create:packager" then
+        local t = peripheral.getType(name) or ""
+        if t:lower():find("packager") then
             packagers[name] = peripheral.wrap(name)
         end
     end
