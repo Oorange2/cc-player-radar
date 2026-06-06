@@ -9,15 +9,21 @@
 -- Set DELIVERY_ADDRESS to match the address written on your delivery packager's sign
 -- Set DELIVERY_VAULT_DIR to the side of the delivery vault relative to the inventory manager
 
-local PROTOCOL         = "vault_ui"
-local DELIVERY_ADDRESS = "delivery"   -- address of the delivery packager
-local DELIVERY_VAULT_DIR = "back"     -- side of delivery vault from inventory manager
-local INV_MANAGER_SIDE   = "left"     -- side inventory manager is on
+local PROTOCOL           = "vault_ui"
+local DELIVERY_VAULT_DIR = "back"   -- side of delivery vault from inventory manager
+local INV_MANAGER_SIDE   = "left"   -- side inventory manager is on
 
 -- ─── Setup ──────────────────────────────────────────────────────────────────
 
 local inv = peripheral.wrap(INV_MANAGER_SIDE)
 if not inv then error("No inventory_manager on " .. INV_MANAGER_SIDE) end
+
+-- Get delivery address from the player linked to the inventory manager
+local DELIVERY_ADDRESS = inv.getOwner()
+if not DELIVERY_ADDRESS then
+    error("No memory card in inventory manager - insert one linked to a player")
+end
+print("Delivery address: " .. DELIVERY_ADDRESS)
 
 -- Open ender modem
 local modemSide = nil
