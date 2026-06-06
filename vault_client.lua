@@ -1,4 +1,4 @@
--- Vault Client v8
+-- Vault Client v9
 -- / = search  |  Shift+Scroll = adjust send amount  |  R = refresh  |  Q = quit
 
 local PROTOCOL      = "vault_ui"
@@ -57,9 +57,10 @@ local function itemColor(name)
     return iconColors[h + 1]
 end
 
--- ─── Filter ──────────────────────────────────────────────────────────────────
+-- ─── Filter (preserves selected item across refreshes) ───────────────────────
 
-local function applyFilter()
+local function applyFilter(preserveName)
+    local prevName = preserveName or (filtered[selected] and filtered[selected].name)
     if searchQuery == "" then
         filtered = items
     else
@@ -68,6 +69,21 @@ local function applyFilter()
         for _, item in ipairs(items) do
             if (item.displayName or item.name):lower():find(q, 1, true) then
                 table.insert(filtered, item)
+            end
+        end
+    end
+    -- Try to keep the same item selected
+    if prevName then
+        for i, item in ipairs(filtered) do
+            if item.name == prevName then
+                selected = i
+                -- Adjust scroll to keep selection visible
+                if selected <= scroll then
+                    scroll = selected - 1
+                elseif selected > scroll + (H - 2) then
+                    scroll = selected - (H - 2)
+                end
+                return
             end
         end
     end
@@ -115,7 +131,8 @@ local function sendItem(count)
         message  = (res and res.err) or "Failed"
         msgTimer = os.clock() + 3
     end
-    doRefresh()
+    -- Don't refresh immediately — server queues the work so the vault
+    -- still shows the item until packaging completes. Periodic timer handles it.
 end
 
 -- ─── Draw ────────────────────────────────────────────────────────────────────
@@ -210,7 +227,6 @@ while true do
 
     local event, p1 = os.pullEvent()
 
-    -- Reset shift if the GUI was closed and reopened (term_resize fires on reopen)
     if event == "term_resize" then
         shiftHeld = false
         W, H = term.getSize()
