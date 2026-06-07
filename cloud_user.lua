@@ -232,9 +232,7 @@ local function logScreen()
             local idx=#log-scroll-row+1
             term.setCursorPos(1,row+1) term.setBackgroundColor(colors.black)
             if log[idx] then
-                local t=(log[idx].time or ""):sub(1,11)
-                term.setTextColor(colors.gray) term.write(t)
-                term.setTextColor(colors.white) term.write(" "..(log[idx].event or ""):sub(1,W-#t-2))
+                term.setTextColor(colors.white) term.write((log[idx].event or ""):sub(1,W))
             else term.setTextColor(colors.black) term.write(string.rep(" ",W)) end
         end
         term.setCursorPos(1,H) term.setTextColor(colors.gray) term.write("Scroll=browse  Q=back")
@@ -271,14 +269,14 @@ local function userMenu()
                     fetchFn=function()
                         local r=rpc({type="list_vault",token=token}) return r or {} end,
                     actionFn=function(item,amt)
-                        local r=rpc({type="withdraw",token=token,name=item.name,count=amt},10)
+                        local r=rpc({type="withdraw",token=token,name=item.name,displayName=item.displayName,count=amt},10)
                         return r and r.ok, r and r.err end })
             elseif sel==2 then
                 itemListUI({ title="Deposit", actionLabel="Deposited",
                     fetchFn=function()
                         local r=rpc({type="list_inventory",token=token}) return r or {} end,
                     actionFn=function(item,amt)
-                        local r=rpc({type="deposit",token=token,name=item.name,count=amt},10)
+                        local r=rpc({type="deposit",token=token,name=item.name,displayName=item.displayName,count=amt},10)
                         return r and r.ok, r and r.err end })
             elseif sel==3 then logScreen()
             elseif sel==4 then token=nil username=nil isAdmin=false return end
@@ -353,12 +351,39 @@ local function adminMenu()
                 if r and r.ok then msg2="Created: "..uname mt2=os.clock()+3
                 else msg2=(r and r.err) or "Failed" mt2=os.clock()+3 end
             elseif sel==3 then
-                term.setBackgroundColor(colors.black) term.clear()
-                term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
-                term.setCursorPos(1,1) term.clearLine() term.write(" Manage User")
-                term.setBackgroundColor(colors.black) term.setTextColor(colors.white)
-                term.setCursorPos(1,3) term.write("Username: ")
-                local target=read()
+                local ures=rpc({type="admin_list_users",token=token})
+                local ulist=(ures and ures.users) or {}
+                if #ulist==0 then msg2="No users found" mt2=os.clock()+2
+                else
+                local usel=1 local uscr=0
+                while true do
+                    term.setBackgroundColor(colors.black) term.clear()
+                    term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
+                    term.setCursorPos(1,1) term.clearLine() term.write(" Select User")
+                    for row=1,H-2 do
+                        local u=ulist[row+uscr] term.setCursorPos(1,row+1)
+                        if u then
+                            if row+uscr==usel then term.setBackgroundColor(colors.gray) term.setTextColor(colors.yellow)
+                            else term.setBackgroundColor(colors.black) term.setTextColor(colors.white) end
+                            term.clearLine() term.write(" "..(u.username or ""):sub(1,W-2))
+                        else term.setBackgroundColor(colors.black) term.write(string.rep(" ",W)) end
+                    end
+                    term.setCursorPos(1,H) term.setBackgroundColor(colors.black)
+                    term.setTextColor(colors.gray) term.write("Enter=select  Q=back")
+                    local ev3,p3=os.pullEvent()
+                    if ev3=="key" then
+                        if p3==keys.q then usel=0 break
+                        elseif p3==keys.up and usel>1 then usel=usel-1
+                            if usel<=uscr then uscr=usel-1 end
+                        elseif p3==keys.down and usel<#ulist then usel=usel+1
+                            if usel>uscr+(H-2) then uscr=uscr+1 end
+                        elseif p3==keys.enter then break end
+                    elseif ev3=="mouse_scroll" then
+                        if p3==-1 and usel>1 then usel=usel-1 if usel<=uscr then uscr=usel-1 end
+                        elseif p3==1 and usel<#ulist then usel=usel+1 if usel>uscr+(H-2) then uscr=uscr+1 end end
+                    end
+                end
+                local target = usel>0 and ulist[usel] and ulist[usel].username or ""
                 if target~="" then
                     local subOpts={"View Vault","View Inventory","Withdraw","Deposit","Delete User","Back"}
                     local subSel=1
@@ -416,6 +441,7 @@ local function adminMenu()
                         end
                     end
                 end
+                end end -- close ulist else + usel check
             elseif sel==4 then
                 -- Debug peripherals
                 local res=rpc({type="debug_peripherals"})
