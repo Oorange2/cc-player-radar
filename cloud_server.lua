@@ -207,13 +207,19 @@ local function handle(cid, msg)
 
     elseif msg.type == "withdraw" then
         local ok, r = doWithdraw(uname, msg.name, msg.count or 1)
-        if ok then addLog(uname, "Withdrew x"..r.." "..msg.name) end
+        if ok then
+            local label = msg.displayName or msg.name
+            addLog(uname, "Withdrew x"..r.." "..label)
+        end
         rednet.send(cid, { type="action_result", ok=ok, err=not ok and r or nil }, PROTOCOL)
         print((ok and "Withdrew" or "Withdraw fail").." ("..uname.."): "..msg.name.." - "..(ok and r or r))
 
     elseif msg.type == "deposit" then
         local ok, r = doDeposit(uname, msg.name, msg.count or 1)
-        if ok then addLog(uname, "Deposited x"..r.." "..msg.name) end
+        if ok then
+            local label = msg.displayName or msg.name
+            addLog(uname, "Deposited x"..r.." "..label)
+        end
         rednet.send(cid, { type="action_result", ok=ok, err=not ok and r or nil }, PROTOCOL)
         print((ok and "Deposited" or "Deposit fail").." ("..uname.."): "..msg.name.." - "..(ok and r or r))
 
