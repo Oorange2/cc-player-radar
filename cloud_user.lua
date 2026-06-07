@@ -342,10 +342,12 @@ local function adminMenu()
                 end
                 local uname  = prompt(3,"Username:   ")
                 local pass   = prompt(4,"Password:   ")
-                local vault  = prompt(5,"Vault:      ")
-                local invmgr = prompt(6,"InvMgr:     ")
+                local vnum   = prompt(5,"Vault #:    ")
+                local imnum  = prompt(6,"InvMgr #:   ")
                 local vdir   = prompt(7,"VaultDir:   ")
                 if vdir=="" then vdir="back" end
+                local vault  = "create:item_vault_"..vnum
+                local invmgr = "inventory_manager_"..imnum
                 local r=rpc({type="admin_create_user",token=token,
                     username=uname,password=pass,vault=vault,invmanager=invmgr,vaultDir=vdir},10)
                 if r and r.ok then msg2="Created: "..uname mt2=os.clock()+3
