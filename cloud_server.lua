@@ -1,4 +1,4 @@
--- Cloud Server v1
+-- Cloud Server v2
 local PROTOCOL  = "cloud_ui"
 local SAVE_FILE = "cloud_accounts.dat"
 
@@ -34,7 +34,7 @@ load()
 local function makeToken()
     math.randomseed(os.clock() * 100000)
     local s = ""
-    for i = 1, 16 do s = s .. string.format("%x", math.random(0, 15)) end
+    for i = 1, 16 do s = s .. string.format("%x", math.random(0,15)) end
     return s
 end
 
@@ -46,37 +46,64 @@ local function getSession(tok)
     return s
 end
 
+-- Try multiple method names on a peripheral, return first that works
+local function pcallMethod(name, ...)
+    local methods = {...}
+    for _, method in ipairs(methods) do
+        if peripheral.isPresent(name) then
+            local ok, result = pcall(function()
+                return peripheral.call(name, method)
+            end)
+            if ok and type(result) == "table" then
+                return result, method
+            end
+        end
+    end
+    return nil, nil
+end
+
 local function listVault(uname)
     local acc = accounts[uname]
-    if not acc or not acc.vault then return {} end
-    local v = peripheral.wrap(acc.vault)
-    if not v then return {} end
+    if not acc or not acc.vault then return {}, "No vault configured" end
+    if not peripheral.isPresent(acc.vault) then
+        return {}, "Vault peripheral '" .. acc.vault .. "' not found - run debug to see available peripherals"
+    end
+    local ok, items = pcall(function() return peripheral.call(acc.vault, "list") end)
+    if not ok or type(items) ~= "table" then
+        return {}, "vault.list() failed: " .. tostring(items)
+    end
     local merged = {}
-    local ok, items = pcall(v.list)
-    if ok and type(items) == "table" then
-        for slot, item in pairs(items) do
+    for slot, item in pairs(items) do
+        if item and item.name then
             if not merged[item.name] then
-                local d; pcall(function() d = v.getItemDetail(slot) end)
+                local d
+                pcall(function() d = peripheral.call(acc.vault, "getItemDetail", slot) end)
                 merged[item.name] = { name=item.name, displayName=(d and d.displayName) or item.name, count=0 }
             end
             merged[item.name].count = merged[item.name].count + item.count
         end
     end
     local list = {}
-    for _, v2 in pairs(merged) do table.insert(list, v2) end
-    table.sort(list, function(a, b) return a.displayName < b.displayName end)
-    return list
+    for _, v in pairs(merged) do table.insert(list, v) end
+    table.sort(list, function(a,b) return a.displayName < b.displayName end)
+    return list, nil
 end
 
 local function listInv(uname)
     local acc = accounts[uname]
-    if not acc or not acc.invmanager then return {} end
-    local im = peripheral.wrap(acc.invmanager)
-    if not im then return {} end
+    if not acc or not acc.invmanager then return {}, "No inv manager configured" end
+    if not peripheral.isPresent(acc.invmanager) then
+        return {}, "InvMgr peripheral '" .. acc.invmanager .. "' not found"
+    end
+    -- inventory_manager is not a standard inventory — try known Plethora method names
+    local items, method = pcallMethod(acc.invmanager, "getItems", "getInventory", "list")
+    if not items then
+        return {}, "Could not list player inventory — inv manager returned nothing (tried getItems/getInventory/list)"
+    end
     local merged = {}
-    local function merge(items)
-        if type(items) ~= "table" then return end
-        for _, item in pairs(items) do
+    local function merge(tbl)
+        if type(tbl) ~= "table" then return end
+        for _, item in pairs(tbl) do
             if item and item.name then
                 if not merged[item.name] then
                     merged[item.name] = { name=item.name, displayName=item.displayName or item.name, count=0 }
@@ -85,15 +112,15 @@ local function listInv(uname)
             end
         end
     end
-    local ok, items = pcall(im.list)
-    if not ok then ok, items = pcall(im.getItems) end
     merge(items)
-    local ok2, armor = pcall(im.getArmour)
+    -- Also grab armor separately
+    local ok2, armor = pcall(function() return peripheral.call(acc.invmanager, "getArmour") end)
+    if not ok2 then ok2, armor = pcall(function() return peripheral.call(acc.invmanager, "getArmor") end) end
     if ok2 then merge(armor) end
     local list = {}
     for _, v in pairs(merged) do table.insert(list, v) end
-    table.sort(list, function(a, b) return a.displayName < b.displayName end)
-    return list
+    table.sort(list, function(a,b) return a.displayName < b.displayName end)
+    return list, nil
 end
 
 local function addLog(uname, entry)
@@ -108,38 +135,37 @@ end
 local function doWithdraw(uname, name, count)
     local acc = accounts[uname]
     if not acc or not acc.vault or not acc.invmanager then return false, "Account not configured" end
-    local v  = peripheral.wrap(acc.vault)
-    local im = peripheral.wrap(acc.invmanager)
-    if not v or not im then return false, "Peripheral missing" end
-    local avail, slot = 0, nil
-    local ok, items = pcall(v.list)
+    if not peripheral.isPresent(acc.vault)      then return false, "Vault not found: "   .. (acc.vault or "?") end
+    if not peripheral.isPresent(acc.invmanager) then return false, "InvMgr not found: " .. (acc.invmanager or "?") end
+    -- Cap to available stock
+    local ok, items = pcall(function() return peripheral.call(acc.vault, "list") end)
+    local avail = 0
     if ok and type(items) == "table" then
-        for s, item in pairs(items) do
-            if item.name == name then avail = avail + item.count if not slot then slot = s end end
+        for _, item in pairs(items) do
+            if item.name == name then avail = avail + item.count end
         end
     end
-    if not slot then return false, "Item not found" end
+    if avail == 0 then return false, "Item not in vault" end
     count = math.min(count, avail)
     local moved
     local pok, err = pcall(function()
-        moved = im.addItemToPlayer(acc.vaultDir or "back", { name=name, count=count })
+        moved = peripheral.call(acc.invmanager, "addItemToPlayer", acc.vaultDir or "back", { name=name, count=count })
     end)
-    if not pok then return false, tostring(err) end
-    if not moved or moved == 0 then return false, "Failed to give item" end
+    if not pok then return false, "addItemToPlayer error: " .. tostring(err) end
+    if not moved or moved == 0 then return false, "Transfer returned 0 — check vaultDir setting" end
     return true, moved
 end
 
 local function doDeposit(uname, name, count)
     local acc = accounts[uname]
     if not acc or not acc.vault or not acc.invmanager then return false, "Account not configured" end
-    local im = peripheral.wrap(acc.invmanager)
-    if not im then return false, "Peripheral missing" end
+    if not peripheral.isPresent(acc.invmanager) then return false, "InvMgr not found: " .. (acc.invmanager or "?") end
     local moved
     local ok, err = pcall(function()
-        moved = im.removeItemFromPlayer(acc.vaultDir or "back", { name=name, count=count })
+        moved = peripheral.call(acc.invmanager, "removeItemFromPlayer", acc.vaultDir or "back", { name=name, count=count })
     end)
-    if not ok then return false, tostring(err) end
-    if not moved or moved == 0 then return false, "Failed to take item" end
+    if not ok then return false, "removeItemFromPlayer error: " .. tostring(err) end
+    if not moved or moved == 0 then return false, "Transfer returned 0 — player may not have item" end
     return true, moved
 end
 
@@ -149,40 +175,47 @@ local function handle(cid, msg)
     if msg.type == "login" then
         local acc = accounts[msg.username]
         if not acc or acc.password ~= msg.password then
-            rednet.send(cid, { type="login_result", ok=false, err="Invalid credentials" }, PROTOCOL)
-            return
+            rednet.send(cid, { type="login_result", ok=false, err="Invalid credentials" }, PROTOCOL) return
         end
-        local tok = makeToken()
+        local tok   = makeToken()
         local admin = acc.isAdmin or msg.username == "admin"
-        sessions[tok] = { username=msg.username, isAdmin=admin, exp=os.time() + 3600 }
+        sessions[tok] = { username=msg.username, isAdmin=admin, exp=os.time()+3600 }
         if not admin then addLog(msg.username, "Logged in") end
         rednet.send(cid, { type="login_result", ok=true, token=tok, isAdmin=admin }, PROTOCOL)
         print(msg.username .. " logged in")
         return
     end
 
+    -- Debug: list all peripherals (no auth needed so admin can diagnose)
+    if msg.type == "debug_peripherals" then
+        rednet.send(cid, { type="debug_result", names=peripheral.getNames() }, PROTOCOL) return
+    end
+
     local sess = getSession(msg.token)
     if not sess then
-        rednet.send(cid, { type="error", err="Session expired" }, PROTOCOL)
-        return
+        rednet.send(cid, { type="error", err="Session expired" }, PROTOCOL) return
     end
     local uname = sess.username
 
     if msg.type == "list_vault" then
-        rednet.send(cid, { type="vault_list", items=listVault(uname) }, PROTOCOL)
+        local items, err = listVault(uname)
+        rednet.send(cid, { type="vault_list", items=items, err=err }, PROTOCOL)
 
     elseif msg.type == "list_inventory" then
-        rednet.send(cid, { type="inventory_list", items=listInv(uname) }, PROTOCOL)
+        local items, err = listInv(uname)
+        rednet.send(cid, { type="inventory_list", items=items, err=err }, PROTOCOL)
 
     elseif msg.type == "withdraw" then
         local ok, r = doWithdraw(uname, msg.name, msg.count or 1)
-        if ok then addLog(uname, "Withdrew x" .. r .. " " .. msg.name) end
+        if ok then addLog(uname, "Withdrew x"..r.." "..msg.name) end
         rednet.send(cid, { type="action_result", ok=ok, err=not ok and r or nil }, PROTOCOL)
+        print((ok and "Withdrew" or "Withdraw fail").." ("..uname.."): "..msg.name.." - "..(ok and r or r))
 
     elseif msg.type == "deposit" then
         local ok, r = doDeposit(uname, msg.name, msg.count or 1)
-        if ok then addLog(uname, "Deposited x" .. r .. " " .. msg.name) end
+        if ok then addLog(uname, "Deposited x"..r.." "..msg.name) end
         rednet.send(cid, { type="action_result", ok=ok, err=not ok and r or nil }, PROTOCOL)
+        print((ok and "Deposited" or "Deposit fail").." ("..uname.."): "..msg.name.." - "..(ok and r or r))
 
     elseif msg.type == "get_log" then
         local acc = accounts[uname]
@@ -207,7 +240,7 @@ local function handle(cid, msg)
         }
         save()
         rednet.send(cid, { type="action_result", ok=true }, PROTOCOL)
-        print("Created user: " .. msg.username)
+        print("Created user: "..msg.username)
 
     elseif msg.type == "admin_delete_user" then
         if not sess.isAdmin then rednet.send(cid, { type="error", err="Not authorized" }, PROTOCOL) return end
@@ -217,11 +250,13 @@ local function handle(cid, msg)
 
     elseif msg.type == "admin_view_vault" then
         if not sess.isAdmin then rednet.send(cid, { type="error", err="Not authorized" }, PROTOCOL) return end
-        rednet.send(cid, { type="vault_list", items=listVault(msg.username) }, PROTOCOL)
+        local items, err = listVault(msg.username)
+        rednet.send(cid, { type="vault_list", items=items, err=err }, PROTOCOL)
 
     elseif msg.type == "admin_view_inventory" then
         if not sess.isAdmin then rednet.send(cid, { type="error", err="Not authorized" }, PROTOCOL) return end
-        rednet.send(cid, { type="inventory_list", items=listInv(msg.username) }, PROTOCOL)
+        local items, err = listInv(msg.username)
+        rednet.send(cid, { type="inventory_list", items=items, err=err }, PROTOCOL)
 
     elseif msg.type == "admin_withdraw" then
         if not sess.isAdmin then rednet.send(cid, { type="error", err="Not authorized" }, PROTOCOL) return end
@@ -236,6 +271,7 @@ local function handle(cid, msg)
 end
 
 print("Cloud server online")
+print("Connected peripherals: " .. table.concat(peripheral.getNames(), ", "))
 while true do
     local cid, msg = rednet.receive(PROTOCOL)
     handle(cid, msg)
