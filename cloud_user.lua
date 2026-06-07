@@ -120,6 +120,7 @@ local function itemListUI(cfg)
             term.write(pr..string.rep(" ",math.max(0,W-#pr-#cLbl))..cLbl)
         else
             local hdr = " "..cfg.title.." ["..#filtered.."]"
+            if #hdr > W - #cLbl then hdr = hdr:sub(1, W - #cLbl) end
             term.write(hdr..string.rep(" ",math.max(0,W-#hdr-#cLbl))..cLbl)
         end
         if fetchErr and #filtered == 0 then
