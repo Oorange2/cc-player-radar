@@ -176,7 +176,7 @@ local function itemListUI(cfg)
                     term.write(("Click again to confirm (" .. (item.displayName or item.name) .. ")"):sub(1, W))
                 end
             else
-                term.setTextColor(colors.gray) term.write("Click item to select  Q=back")
+                term.setTextColor(colors.gray) term.write("RClick=full stack  Q=back")
             end
         end
         term.setCursorPos(1, H) term.setBackgroundColor(colors.black) term.write(string.rep(" ", W))
@@ -230,7 +230,8 @@ local function itemListUI(cfg)
                 local idx = rowToIdx(my)
                 if idx then
                     local item = filtered[idx]
-                    if shiftHeld then
+                    if p1 == 2 then
+                        -- right click: instant full stack
                         selAmt[item.name] = math.min(64, item.count)
                         selIdx = idx
                         doAction(item)
