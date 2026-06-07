@@ -4,12 +4,16 @@
 local PROTOCOL           = "vault_ui"
 local DELIVERY_VAULT_DIR = "back"
 
-local SOURCES = {
-    { vault="create:item_vault_9",  buffer="minecraft:barrel_7",  packager="Create_Packager_1" },
-    { vault="create:item_vault_10", buffer="minecraft:barrel_8",  packager="Create_Packager_0" },
-    { vault="create:item_vault_11", buffer="minecraft:barrel_9",  packager="Create_Packager_2" },
-    { vault="create:item_vault_12", buffer="minecraft:barrel_10", packager="Create_Packager_3" },
-}
+-- ── Source stations loaded from sources.cfg (run vault_setup.lua to build it) ─
+
+local _cfgFile = fs.open("sources.cfg", "r")
+if not _cfgFile then
+    error("sources.cfg not found — run vault_setup.lua first to pair your vaults, barrels, and packagers")
+end
+local SOURCES = textutils.unserialize(_cfgFile.readAll())
+_cfgFile.close()
+assert(type(SOURCES) == "table" and #SOURCES > 0, "sources.cfg is empty or corrupt — re-run vault_setup.lua")
+print("Loaded " .. #SOURCES .. " stations from sources.cfg")
 
 local inv = peripheral.find("inventory_manager")
 if not inv then error("No inventory_manager found on network") end
