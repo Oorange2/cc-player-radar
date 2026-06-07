@@ -255,6 +255,8 @@ local function itemListUI(cfg)
                     if selIdx then selIdx = nil else return end
                 elseif p1 == keys.r then doFetch() applyFilter() message = "Refreshed" msgTimer = os.clock() + 1
                 elseif p1 == keys.slash then searchMode = true searchQuery = "" applyFilter() end
+            elseif ev == "key_up" then
+                if p1 == keys.leftShift or p1 == keys.rightShift then shiftHeld = false end
             end
         end
     end
