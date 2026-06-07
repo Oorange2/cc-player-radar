@@ -441,7 +441,7 @@ local function adminMenu()
                         end
                     end
                 end
-                end end -- close ulist else + usel check
+                end -- close if #ulist==0 else block
             elseif sel==4 then
                 -- Debug peripherals
                 local res=rpc({type="debug_peripherals"})
