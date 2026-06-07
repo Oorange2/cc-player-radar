@@ -230,7 +230,11 @@ local function itemListUI(cfg)
                 local idx = rowToIdx(my)
                 if idx then
                     local item = filtered[idx]
-                    if idx == selIdx then doAction(item)
+                    if shiftHeld then
+                        selAmt[item.name] = math.min(64, item.count)
+                        selIdx = idx
+                        doAction(item)
+                    elseif idx == selIdx then doAction(item)
                     else
                         selIdx = idx
                         if not selAmt[item.name] then selAmt[item.name] = 1 end
