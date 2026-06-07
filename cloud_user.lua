@@ -1,4 +1,4 @@
--- Cloud User v3
+-- Cloud User v4
 local PROTOCOL = "cloud_ui"
 
 local modemSide = nil
@@ -56,274 +56,370 @@ local function doLogin()
     end
 end
 
--- Shared item list UI
+-- Item list UI (click-based)
 local function itemListUI(cfg)
     local items       = {}
     local filtered    = {}
-    local selected    = 1
     local scroll      = 0
-    local shiftHeld   = false
-    local sendCount   = 1
+    local selIdx      = nil
+    local selAmt      = {}
     local searchMode  = false
     local searchQuery = ""
     local message     = ""
     local msgTimer    = 0
-    local postTimer   = nil
     local fetchErr    = nil
+
+    local LIST_TOP = 2
+    local function listBot()  return H - 3 end
+    local function listRows() return listBot() - LIST_TOP + 1 end
 
     local function doFetch()
         local res = cfg.fetchFn()
-        items    = res.items or {}
-        fetchErr = res.err
-        return items
+        items    = (res and res.items) or {}
+        fetchErr = res and res.err
     end
 
     local function applyFilter()
-        local prev = filtered[selected] and filtered[selected].name
         if searchQuery == "" then
             filtered = items
         else
             local q = searchQuery:lower()
             filtered = {}
             for _, item in ipairs(items) do
-                if (item.displayName or item.name):lower():find(q,1,true) then
+                if (item.displayName or item.name):lower():find(q, 1, true) then
                     table.insert(filtered, item)
                 end
             end
         end
-        selected = 1
-        scroll   = 0
-        if prev then
-            for i, item in ipairs(filtered) do
-                if item.name == prev then
-                    selected = i
-                    if selected <= scroll then scroll = selected-1
-                    elseif selected > scroll+(H-2) then scroll = selected-(H-2) end
-                    return
-                end
-            end
-        end
+        scroll = 0
+        selIdx = nil
     end
 
     doFetch()
     applyFilter()
 
+    local function getAmt(item)
+        return selAmt[item.name] or 1
+    end
+
     local function draw()
+        W, H = term.getSize()
         term.setBackgroundColor(colors.black) term.clear()
+
+        -- header
         term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
-        term.setCursorPos(1,1) term.clearLine()
-        local cur  = filtered[selected]
-        local cap  = cur and math.min(sendCount, cur.count) or sendCount
-        local cLbl = " x"..cap
+        term.setCursorPos(1, 1) term.clearLine()
         if searchMode then
-            local pr = "/"..searchQuery
-            term.write(pr..string.rep(" ",math.max(0,W-#pr-#cLbl))..cLbl)
+            term.write(" /" .. searchQuery .. "_")
         else
-            local hdr = " "..cfg.title.." ["..#filtered.."]"
-            if #hdr > W - #cLbl then hdr = hdr:sub(1, W - #cLbl) end
-            term.write(hdr..string.rep(" ",math.max(0,W-#hdr-#cLbl))..cLbl)
+            local hdr = " " .. cfg.title .. " [" .. #filtered .. "]"
+            if #hdr > W - 3 then hdr = hdr:sub(1, W - 3) end
+            term.write(hdr .. string.rep(" ", math.max(0, W - #hdr - 3)) .. "[X]")
         end
+
+        -- item rows
         if fetchErr and #filtered == 0 then
-            term.setCursorPos(1,3)
+            term.setCursorPos(1, LIST_TOP)
             term.setBackgroundColor(colors.black) term.setTextColor(colors.red)
-            local s = fetchErr
-            local row = 0
-            while #s > 0 and row+3 < H do
-                row = row+1
-                term.setCursorPos(1, row+2) term.write(s:sub(1,W))
-                s = s:sub(W+1)
-            end
+            term.write(fetchErr:sub(1, W))
         else
-            for row = 1, H-2 do
-                local idx  = row+scroll
+            for row = 1, listRows() do
+                local idx  = row + scroll
                 local item = filtered[idx]
-                term.setCursorPos(1, row+1)
+                local sr   = LIST_TOP + row - 1
+                term.setCursorPos(1, sr)
                 if item then
-                    local isSel = idx == selected
-                    term.setBackgroundColor(itemColor(item.name)) term.setTextColor(colors.black) term.write("  ")
-                    local cs  = "x"..item.count
-                    local lbl = (item.displayName or item.name):sub(1, W-3-#cs)
-                    term.setBackgroundColor(isSel and colors.gray or colors.black)
-                    term.setTextColor(isSel and colors.yellow or colors.white)
-                    term.write(" "..lbl)
-                    term.setTextColor(colors.cyan)
-                    term.write(string.rep(" ", math.max(0,W-3-#lbl-#cs))..cs)
+                    local isSel = (idx == selIdx)
+                    local amt   = getAmt(item)
+                    term.setBackgroundColor(itemColor(item.name)) term.setTextColor(colors.black) term.write(" ")
+                    if isSel then
+                        local qStr = ">" .. amt .. "/" .. item.count .. "<"
+                        local lbl  = (item.displayName or item.name):sub(1, W - 2 - #qStr)
+                        term.setBackgroundColor(colors.gray) term.setTextColor(colors.yellow)
+                        term.write(" " .. lbl)
+                        term.setTextColor(colors.lime)
+                        term.write(string.rep(" ", math.max(0, W - 2 - #lbl - #qStr)) .. qStr)
+                    else
+                        local cs  = "x" .. item.count
+                        local lbl = (item.displayName or item.name):sub(1, W - 3 - #cs)
+                        term.setBackgroundColor(colors.black) term.setTextColor(colors.white)
+                        term.write(" " .. lbl)
+                        term.setTextColor(colors.cyan)
+                        term.write(string.rep(" ", math.max(0, W - 3 - #lbl - #cs)) .. cs)
+                    end
                 else
-                    term.setBackgroundColor(colors.black) term.write(string.rep(" ",W))
+                    term.setBackgroundColor(colors.black) term.write(string.rep(" ", W))
                 end
             end
         end
-        term.setCursorPos(1,H) term.setBackgroundColor(colors.black)
+
+        -- scroll arrows
+        if scroll > 0 then
+            term.setCursorPos(W, LIST_TOP)
+            term.setBackgroundColor(colors.gray) term.setTextColor(colors.white) term.write("^")
+        end
+        if scroll + listRows() < #filtered then
+            term.setCursorPos(W, listBot())
+            term.setBackgroundColor(colors.gray) term.setTextColor(colors.white) term.write("v")
+        end
+
+        -- button bar
+        local bRow = H - 2
+        term.setCursorPos(1, bRow) term.setBackgroundColor(colors.black) term.clearLine()
+        term.setBackgroundColor(colors.gray) term.setTextColor(colors.white) term.write(" / Search ")
+        term.setBackgroundColor(colors.black) term.write(" ")
+        term.setBackgroundColor(colors.gray)  term.write(" R Refresh ")
+        term.setBackgroundColor(colors.black) term.write(" ")
+        term.setBackgroundColor(colors.blue)  term.write(" < Back ")
+
+        -- status bar
+        term.setCursorPos(1, H - 1) term.setBackgroundColor(colors.black)
         if message ~= "" and os.clock() < msgTimer then
-            term.setTextColor(colors.lime) term.write(message:sub(1,W))
-        elseif searchMode then
-            term.setTextColor(colors.gray) term.write("Bksp=cancel  Enter=confirm")
+            term.setTextColor(colors.lime) term.write(message:sub(1, W))
         else
-            term.setTextColor(colors.gray) term.write("R=refresh  Q=back")
+            message = ""
+            if selIdx and cfg.actionFn then
+                local item = filtered[selIdx]
+                if item then
+                    term.setTextColor(colors.yellow)
+                    term.write(("Click again to confirm (" .. (item.displayName or item.name) .. ")"):sub(1, W))
+                end
+            else
+                term.setTextColor(colors.gray)
+                term.write("Click item to select  Q=back")
+            end
+        end
+
+        term.setCursorPos(1, H) term.setBackgroundColor(colors.black) term.write(string.rep(" ", W))
+    end
+
+    local function rowToIdx(my)
+        if my < LIST_TOP or my > listBot() then return nil end
+        local idx = (my - LIST_TOP) + 1 + scroll
+        return (idx >= 1 and idx <= #filtered) and idx or nil
+    end
+
+    local function hitBtnBar(mx, my)
+        if my ~= H - 2 then return nil end
+        if mx >= 1  and mx <= 10 then return "search"  end
+        if mx >= 12 and mx <= 22 then return "refresh" end
+        if mx >= 24 and mx <= 31 then return "back"    end
+        return nil
+    end
+
+    local function doAction(item)
+        if not cfg.actionFn then return end
+        local amt = math.min(getAmt(item), item.count)
+        local ok, err = cfg.actionFn(item, amt)
+        if ok then
+            message  = (cfg.actionLabel or "Done") .. " x" .. amt .. ": " .. (item.displayName or item.name)
+            msgTimer = os.clock() + 3
+            selIdx   = nil
+            doFetch() applyFilter()
+        else
+            message  = err or "Failed"
+            msgTimer = os.clock() + 3
         end
     end
 
     while true do
         draw()
-        local event, p1 = os.pullEvent()
-        if event == "term_resize" then shiftHeld=false W,H=term.getSize() end
-        if searchMode then
-            if event == "char" then
-                searchQuery = searchQuery..p1
+        local ev, p1, p2, p3 = os.pullEvent()
+
+        if ev == "term_resize" then
+            W, H = term.getSize()
+
+        elseif searchMode then
+            if ev == "char" then
+                searchQuery = searchQuery .. p1
                 applyFilter()
-            elseif event == "key" then
+            elseif ev == "key" then
                 if p1 == keys.backspace then
-                    if searchQuery == "" then searchMode=false applyFilter()
-                    else searchQuery=searchQuery:sub(1,-2) applyFilter() end
+                    if searchQuery == "" then searchMode = false
+                    else searchQuery = searchQuery:sub(1, -2) applyFilter() end
                 elseif p1 == keys.enter then
                     searchMode = false
                 end
+            elseif ev == "mouse_click" then
+                searchMode = false
             end
+
         else
-            if event == "key" then
-                if p1 == keys.leftShift or p1 == keys.rightShift then
-                    shiftHeld = true
-                elseif p1 == keys.up then
-                    if selected > 1 then
-                        selected = selected-1
-                        if selected <= scroll then scroll = scroll-1 end
+            if ev == "mouse_click" then
+                local mx, my = p2, p3
+                if my == 1 and mx >= W - 2 then return end  -- [X]
+                local idx = rowToIdx(my)
+                if idx then
+                    local item = filtered[idx]
+                    if idx == selIdx then
+                        doAction(item)
+                    else
+                        selIdx = idx
+                        if not selAmt[item.name] then selAmt[item.name] = 1 end
                     end
-                elseif p1 == keys.down then
-                    if selected < #filtered then
-                        selected = selected+1
-                        if selected > scroll+(H-2) then scroll = scroll+1 end
-                    end
-                elseif p1 == keys.enter then
-                    local stack = shiftHeld
-                    shiftHeld = false
-                    local item = filtered[selected]
-                    if item and not cfg.readOnly and cfg.actionFn then
-                        local amt = math.min(stack and 64 or sendCount, item.count)
-                        local ok, err = cfg.actionFn(item, amt)
-                        if ok then
-                            message  = cfg.actionLabel.." x"..amt..": "..(item.displayName or item.name)
-                            msgTimer = os.clock()+3
-                            postTimer = os.startTimer(1)
-                        else
-                            message  = err or "Failed"
-                            msgTimer = os.clock()+3
-                        end
-                    end
-                elseif p1 == keys.r then
-                    doFetch() applyFilter() message="Refreshed" msgTimer=os.clock()+1
-                elseif p1 == keys.q then
-                    return
-                elseif p1 == keys.slash then
-                    searchMode=true searchQuery="" applyFilter()
-                end
-            elseif event == "key_up" then
-                if p1 == keys.leftShift or p1 == keys.rightShift then shiftHeld=false end
-            elseif event == "mouse_scroll" then
-                if shiftHeld then
-                    local cur = filtered[selected]
-                    sendCount = math.max(1, math.min(sendCount-p1, cur and cur.count or 9999))
                 else
-                    if p1 == -1 and selected > 1 then
-                        selected = selected-1
-                        if selected <= scroll then scroll=scroll-1 end
-                    elseif p1 == 1 and selected < #filtered then
-                        selected = selected+1
-                        if selected > scroll+(H-2) then scroll=scroll+1 end
-                    end
+                    selIdx = nil
                 end
-            elseif event == "timer" and p1 == postTimer then
-                postTimer = nil
-                doFetch()
-                applyFilter()
+                local btn = hitBtnBar(mx, my)
+                if btn == "search" then
+                    searchMode = true searchQuery = "" applyFilter()
+                elseif btn == "refresh" then
+                    doFetch() applyFilter()
+                    message = "Refreshed" msgTimer = os.clock() + 1
+                elseif btn == "back" then
+                    return
+                end
+
+            elseif ev == "mouse_scroll" then
+                local dir, mx, my = p1, p2, p3
+                local idx = rowToIdx(my)
+                if idx and idx == selIdx then
+                    local item = filtered[idx]
+                    local cur  = selAmt[item.name] or 1
+                    selAmt[item.name] = math.max(1, math.min(cur - dir, item.count))
+                else
+                    local maxScroll = math.max(0, #filtered - listRows())
+                    scroll = math.max(0, math.min(scroll + dir, maxScroll))
+                end
+
+            elseif ev == "key" then
+                if p1 == keys.q then
+                    if selIdx then selIdx = nil
+                    else return end
+                elseif p1 == keys.r then
+                    doFetch() applyFilter()
+                    message = "Refreshed" msgTimer = os.clock() + 1
+                elseif p1 == keys.slash then
+                    searchMode = true searchQuery = "" applyFilter()
+                end
             end
         end
     end
 end
 
--- Log screen
+-- Log screen (click-based)
 local function logScreen()
     local res = rpc({ type="get_log", token=token })
     local log = (res and res.log) or {}
     local scroll = 0
     while true do
+        W, H = term.getSize()
+        local listH = H - 3
         term.setBackgroundColor(colors.black) term.clear()
         term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
-        term.setCursorPos(1,1) term.clearLine() term.write(" Activity Log ["..#log.."]")
-        for row = 1, H-2 do
+        term.setCursorPos(1, 1) term.clearLine()
+        local hdr = " Activity Log [" .. #log .. "]"
+        term.write(hdr .. string.rep(" ", math.max(0, W - #hdr - 3)) .. "[X]")
+        for row = 1, listH do
             local idx = #log - scroll - row + 1
-            term.setCursorPos(1, row+1) term.setBackgroundColor(colors.black)
+            term.setCursorPos(1, row + 1) term.setBackgroundColor(colors.black)
             if log[idx] then
                 term.setTextColor(colors.white)
-                term.write((log[idx].event or ""):sub(1,W))
+                term.write((log[idx].event or ""):sub(1, W))
             else
-                term.setTextColor(colors.black) term.write(string.rep(" ",W))
+                term.setTextColor(colors.black) term.write(string.rep(" ", W))
             end
         end
-        term.setCursorPos(1,H) term.setTextColor(colors.gray) term.write("Scroll=browse  Q=back")
-        local ev, p1 = os.pullEvent()
-        if ev == "key" then
-            if p1 == keys.q then return
-            elseif p1 == keys.up then scroll=math.max(0,scroll-1)
-            elseif p1 == keys.down then scroll=math.min(math.max(0,#log-(H-2)),scroll+1) end
+        if scroll > 0 then
+            term.setCursorPos(W, 2)
+            term.setBackgroundColor(colors.gray) term.setTextColor(colors.white) term.write("^")
+        end
+        if scroll + listH < #log then
+            term.setCursorPos(W, H - 2)
+            term.setBackgroundColor(colors.gray) term.setTextColor(colors.white) term.write("v")
+        end
+        term.setCursorPos(1, H - 1)
+        term.setBackgroundColor(colors.black) term.clearLine()
+        term.setBackgroundColor(colors.blue) term.setTextColor(colors.white) term.write(" < Back ")
+        term.setBackgroundColor(colors.black) term.setTextColor(colors.gray) term.write("  Q=back")
+        term.setCursorPos(1, H) term.setBackgroundColor(colors.black) term.write(string.rep(" ", W))
+
+        local ev, p1, p2, p3 = os.pullEvent()
+        if ev == "term_resize" then W, H = term.getSize()
+        elseif ev == "mouse_click" then
+            local mx, my = p2, p3
+            if (my == 1 and mx >= W - 2) or (my == H - 1 and mx <= 8) then return end
         elseif ev == "mouse_scroll" then
-            scroll = math.max(0, math.min(scroll+p1, math.max(0,#log-(H-2))))
+            scroll = math.max(0, math.min(scroll + p1, math.max(0, #log - listH)))
+        elseif ev == "key" then
+            if p1 == keys.q then return
+            elseif p1 == keys.up   then scroll = math.max(0, scroll - 1)
+            elseif p1 == keys.down then scroll = math.min(math.max(0, #log - listH), scroll + 1)
+            end
         end
     end
 end
 
--- User menu
+-- User menu (click-based)
 local function userMenu()
-    local opts = {"Withdraw","Deposit","Log","Logout"}
-    local sel  = 1
+    local menuItems = {
+        { label="Withdraw", icon=colors.green },
+        { label="Deposit",  icon=colors.blue  },
+        { label="Log",      icon=colors.gray  },
+        { label="Logout",   icon=colors.red   },
+    }
     while true do
+        W, H = term.getSize()
         term.setBackgroundColor(colors.black) term.clear()
         term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
-        term.setCursorPos(1,1) term.clearLine() term.write(" Cloud - "..username)
-        for i, opt in ipairs(opts) do
-            term.setCursorPos(3, i+2)
-            if i == sel then term.setBackgroundColor(colors.gray) term.setTextColor(colors.yellow)
-            else term.setBackgroundColor(colors.black) term.setTextColor(colors.white) end
-            term.clearLine() term.write(" "..opt)
+        term.setCursorPos(1, 1) term.clearLine()
+        local hdr = " Cloud - " .. username
+        if #hdr > W - 3 then hdr = hdr:sub(1, W - 3) end
+        term.write(hdr .. string.rep(" ", math.max(0, W - #hdr - 3)) .. "[X]")
+        for i, opt in ipairs(menuItems) do
+            local row = i + 2
+            term.setCursorPos(1, row)
+            term.setBackgroundColor(opt.icon) term.setTextColor(colors.black) term.write(" ")
+            term.setBackgroundColor(colors.black) term.setTextColor(colors.white)
+            term.write(" " .. opt.label .. string.rep(" ", W - #opt.label - 2))
         end
-        term.setBackgroundColor(colors.black)
-        local ev, p1 = os.pullEvent("key")
-        if p1 == keys.up and sel > 1 then sel=sel-1
-        elseif p1 == keys.down and sel < #opts then sel=sel+1
-        elseif p1 == keys.enter then
-            if sel == 1 then
-                itemListUI({
-                    title="Withdraw", actionLabel="Withdrew",
-                    fetchFn=function()
-                        local r = rpc({type="list_vault", token=token})
-                        return r or {}
-                    end,
-                    actionFn=function(item, amt)
-                        local r = rpc({type="withdraw", token=token, name=item.name, displayName=item.displayName, count=amt}, 10)
-                        return r and r.ok, r and r.err
-                    end,
-                })
-            elseif sel == 2 then
-                itemListUI({
-                    title="Deposit", actionLabel="Deposited",
-                    fetchFn=function()
-                        local r = rpc({type="list_inventory", token=token})
-                        return r or {}
-                    end,
-                    actionFn=function(item, amt)
-                        local r = rpc({type="deposit", token=token, name=item.name, displayName=item.displayName, count=amt}, 10)
-                        return r and r.ok, r and r.err
-                    end,
-                })
-            elseif sel == 3 then
-                logScreen()
-            elseif sel == 4 then
-                token=nil username=nil isAdmin=false return
+        term.setCursorPos(1, H) term.setBackgroundColor(colors.black) term.write(string.rep(" ", W))
+
+        local ev, p1, p2, p3 = os.pullEvent()
+        if ev == "term_resize" then
+            W, H = term.getSize()
+        elseif ev == "mouse_click" then
+            local mx, my = p2, p3
+            if my == 1 and mx >= W - 2 then token=nil username=nil isAdmin=false return end
+            for i, opt in ipairs(menuItems) do
+                if my == i + 2 then
+                    if opt.label == "Withdraw" then
+                        itemListUI({
+                            title="Withdraw", actionLabel="Withdrew",
+                            fetchFn=function()
+                                local r = rpc({type="list_vault", token=token}) return r or {}
+                            end,
+                            actionFn=function(item, amt)
+                                local r = rpc({type="withdraw", token=token, name=item.name, displayName=item.displayName, count=amt}, 10)
+                                return r and r.ok, r and r.err
+                            end,
+                        })
+                    elseif opt.label == "Deposit" then
+                        itemListUI({
+                            title="Deposit", actionLabel="Deposited",
+                            fetchFn=function()
+                                local r = rpc({type="list_inventory", token=token}) return r or {}
+                            end,
+                            actionFn=function(item, amt)
+                                local r = rpc({type="deposit", token=token, name=item.name, displayName=item.displayName, count=amt}, 10)
+                                return r and r.ok, r and r.err
+                            end,
+                        })
+                    elseif opt.label == "Log" then
+                        logScreen()
+                    elseif opt.label == "Logout" then
+                        token=nil username=nil isAdmin=false return
+                    end
+                    break
+                end
             end
+        elseif ev == "key" then
+            if p1 == keys.q then token=nil username=nil isAdmin=false return end
         end
     end
 end
 
--- Admin: pick user from list, returns username or nil
+-- Admin: pick user from list
 local function pickUser()
     local res   = rpc({type="admin_list_users", token=token})
     local ulist = (res and res.users) or {}
@@ -391,16 +487,13 @@ local function adminMenu()
         term.setCursorPos(1,H) term.setBackgroundColor(colors.black)
         if msg2 ~= "" and os.clock() < mt2 then
             term.setTextColor(colors.lime) term.write(msg2:sub(1,W))
-        else
-            msg2 = ""
-        end
+        else msg2 = "" end
         local ev, p1 = os.pullEvent("key")
         if p1 == keys.up and sel > 1 then sel=sel-1
         elseif p1 == keys.down and sel < #opts then sel=sel+1
         elseif p1 == keys.enter then
 
             if sel == 1 then
-                -- List users (read-only view)
                 local res   = rpc({type="admin_list_users", token=token})
                 local users = (res and res.users) or {}
                 local us    = 0
@@ -429,7 +522,6 @@ local function adminMenu()
                 end
 
             elseif sel == 2 then
-                -- Create user
                 term.setBackgroundColor(colors.black) term.clear()
                 term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
                 term.setCursorPos(1,1) term.clearLine() term.write(" Create User")
@@ -451,7 +543,6 @@ local function adminMenu()
                 else msg2=(r and r.err) or "Failed" mt2=os.clock()+3 end
 
             elseif sel == 3 then
-                -- Manage user - pick from list
                 local target, err = pickUser()
                 if not target then
                     if err then msg2=err mt2=os.clock()+2 end
@@ -516,7 +607,6 @@ local function adminMenu()
                 end
 
             elseif sel == 4 then
-                -- Debug peripherals
                 local res   = rpc({type="debug_peripherals"})
                 local names = (res and res.names) or {}
                 local ds    = 0
@@ -543,7 +633,6 @@ local function adminMenu()
             elseif sel == 5 then
                 token=nil username=nil isAdmin=false return
             end
-
         end
     end
 end
