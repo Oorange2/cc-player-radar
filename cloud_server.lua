@@ -1,0 +1,573 @@
+-- Cloud Server v3
+local PROTOCOL   = "cloud_ui"
+local SAVE_FILE  = "cloud_accounts.dat"
+local BANK_FILE  = "bank_data.dat"
+local BANK_VAULT = "create:item_vault_30"
+local SPUR_ID    = "numismatics:spur"
+
+local modemSide = nil
+for _, s in ipairs({"top","bottom","left","right","front","back"}) do
+    if peripheral.getType(s) == "modem" then modemSide = s break end
+end
+if not modemSide then error("No modem found") end
+rednet.open(modemSide)
+
+local accounts = {}
+local sessions  = {}
+
+local function save()
+    local f = fs.open(SAVE_FILE, "w") f.write(textutils.serialize(accounts)) f.close()
+end
+
+local function load()
+    if fs.exists(SAVE_FILE) then
+        local f = fs.open(SAVE_FILE, "r")
+        accounts = textutils.unserialize(f.readAll()) or {}
+        f.close()
+    end
+    if not accounts["admin"] then
+        accounts["admin"] = { password="2007", isAdmin=true, vault=nil, invmanager=nil, vaultDir="back", log={} }
+        save()
+    end
+end
+load()
+
+local function makeToken()
+    math.randomseed(os.clock() * 100000)
+    local s = ""
+    for i = 1, 16 do s = s .. string.format("%x", math.random(0,15)) end
+    return s
+end
+
+local function getSession(tok)
+    local s = sessions[tok]
+    if not s then return nil end
+    if os.time() > s.exp then sessions[tok] = nil return nil end
+    s.exp = os.time() + 3600
+    return s
+end
+
+local function pcallMethod(name, ...)
+    local methods = {...}
+    for _, method in ipairs(methods) do
+        if peripheral.isPresent(name) then
+            local ok, result = pcall(function() return peripheral.call(name, method) end)
+            if ok and type(result) == "table" then return result, method end
+        end
+    end
+    return nil, nil
+end
+
+local function listVault(uname)
+    local acc = accounts[uname]
+    if not acc or not acc.vault then return {}, "No vault configured" end
+    if not peripheral.isPresent(acc.vault) then
+        return {}, "Vault '" .. acc.vault .. "' not found"
+    end
+    local ok, items = pcall(function() return peripheral.call(acc.vault, "list") end)
+    if not ok or type(items) ~= "table" then return {}, "vault.list() failed" end
+    local merged = {}
+    for slot, item in pairs(items) do
+        if item and item.name then
+            if not merged[item.name] then
+                local d
+                pcall(function() d = peripheral.call(acc.vault, "getItemDetail", slot) end)
+                merged[item.name] = { name=item.name, displayName=(d and d.displayName) or item.name, count=0 }
+            end
+            merged[item.name].count = merged[item.name].count + item.count
+        end
+    end
+    local list = {}
+    for _, v in pairs(merged) do table.insert(list, v) end
+    table.sort(list, function(a,b) return a.displayName < b.displayName end)
+    return list, nil
+end
+
+local function listInv(uname)
+    local acc = accounts[uname]
+    if not acc or not acc.invmanager then return {}, "No inv manager configured" end
+    if not peripheral.isPresent(acc.invmanager) then
+        return {}, "InvMgr '" .. acc.invmanager .. "' not found"
+    end
+    local items = pcallMethod(acc.invmanager, "getItems", "getInventory", "list")
+    if not items then return {}, "Could not list player inventory" end
+    local merged = {}
+    local function merge(tbl)
+        if type(tbl) ~= "table" then return end
+        for _, item in pairs(tbl) do
+            if item and item.name then
+                if not merged[item.name] then
+                    merged[item.name] = { name=item.name, displayName=item.displayName or item.name, count=0 }
+                end
+                merged[item.name].count = merged[item.name].count + (item.count or 1)
+            end
+        end
+    end
+    merge(items)
+    local ok2, armor = pcall(function() return peripheral.call(acc.invmanager, "getArmour") end)
+    if not ok2 then ok2, armor = pcall(function() return peripheral.call(acc.invmanager, "getArmor") end) end
+    if ok2 then merge(armor) end
+    local list = {}
+    for _, v in pairs(merged) do table.insert(list, v) end
+    table.sort(list, function(a,b) return a.displayName < b.displayName end)
+    return list, nil
+end
+
+local function addLog(uname, entry)
+    local acc = accounts[uname]
+    if not acc then return end
+    acc.log = acc.log or {}
+    table.insert(acc.log, { time=os.date("%H:%M %d/%m"), event=entry })
+    while #acc.log > 200 do table.remove(acc.log, 1) end
+    save()
+end
+
+local function doWithdraw(uname, name, count)
+    local acc = accounts[uname]
+    if not acc or not acc.vault or not acc.invmanager then return false, "Account not configured" end
+    if not peripheral.isPresent(acc.vault)      then return false, "Vault not found: "   .. (acc.vault or "?") end
+    if not peripheral.isPresent(acc.invmanager) then return false, "InvMgr not found: " .. (acc.invmanager or "?") end
+    local ok, items = pcall(function() return peripheral.call(acc.vault, "list") end)
+    local avail = 0
+    if ok and type(items) == "table" then
+        for _, item in pairs(items) do
+            if item.name == name then avail = avail + item.count end
+        end
+    end
+    if avail == 0 then return false, "Item not in vault" end
+    count = math.min(count, avail)
+    local moved
+    local pok, err = pcall(function()
+        moved = peripheral.call(acc.invmanager, "addItemToPlayer", acc.vaultDir or "back", { name=name, count=count })
+    end)
+    if not pok then return false, "addItemToPlayer error: " .. tostring(err) end
+    if not moved or moved == 0 then return false, "Transfer returned 0" end
+    return true, moved
+end
+
+local function doDeposit(uname, name, count)
+    local acc = accounts[uname]
+    if not acc or not acc.vault or not acc.invmanager then return false, "Account not configured" end
+    if not peripheral.isPresent(acc.invmanager) then return false, "InvMgr not found: " .. (acc.invmanager or "?") end
+    local moved
+    local ok, err = pcall(function()
+        moved = peripheral.call(acc.invmanager, "removeItemFromPlayer", acc.vaultDir or "back", { name=name, count=count })
+    end)
+    if not ok then return false, "removeItemFromPlayer error: " .. tostring(err) end
+    if not moved or moved == 0 then return false, "Transfer returned 0" end
+    return true, moved
+end
+
+-- ── Banking ──────────────────────────────────────────────────────────────────
+local bankData = {}
+
+local function saveBank()
+    local f = fs.open(BANK_FILE, "w") f.write(textutils.serialize(bankData)) f.close()
+end
+
+local function loadBank()
+    if fs.exists(BANK_FILE) then
+        local f = fs.open(BANK_FILE, "r")
+        bankData = textutils.unserialize(f.readAll()) or {}
+        f.close()
+    end
+    if not bankData.accounts then bankData.accounts = {} end
+end
+loadBank()
+
+local function getBankAcc(uname)
+    if not bankData.accounts[uname] then
+        bankData.accounts[uname] = { balance=0, dep_ts=os.epoch("utc"), loan=nil, credit=500, blog={} }
+    end
+    return bankData.accounts[uname]
+end
+
+local function addBankLog(uname, event)
+    local b = getBankAcc(uname)
+    table.insert(b.blog, { event=event, ts=os.epoch("utc") })
+    while #b.blog > 100 do table.remove(b.blog, 1) end
+end
+
+local function getLoanRate(credit)
+    if credit >= 750 then return 6
+    elseif credit >= 600 then return 8
+    elseif credit >= 450 then return 10
+    elseif credit >= 300 then return 13
+    else return nil end
+end
+
+local function countSpurs(vaultName)
+    if not peripheral.isPresent(vaultName) then return 0 end
+    local ok, items = pcall(function() return peripheral.call(vaultName, "list") end)
+    if not ok or type(items) ~= "table" then return 0 end
+    local total = 0
+    for _, item in pairs(items) do
+        if item.name == SPUR_ID then total = total + item.count end
+    end
+    return total
+end
+
+local function moveSpurs(fromV, toV, amount)
+    if not peripheral.isPresent(fromV) then return 0 end
+    if not peripheral.isPresent(toV)   then return 0 end
+    local ok, items = pcall(function() return peripheral.call(fromV, "list") end)
+    if not ok or type(items) ~= "table" then return 0 end
+    local moved = 0
+    for slot, item in pairs(items) do
+        if item.name == SPUR_ID and moved < amount then
+            local ok2, n = pcall(function()
+                return peripheral.call(fromV, "pushItems", toV, slot, amount - moved)
+            end)
+            if ok2 and n then moved = moved + n end
+        end
+    end
+    return moved
+end
+
+local function applyDepInterest(uname)
+    local b = getBankAcc(uname)
+    if b.balance <= 0 then return end
+    local now  = os.epoch("utc")
+    local days = math.floor((now - b.dep_ts) / 86400000)
+    if days <= 0 then return end
+    local gained = math.floor(b.balance * 0.02 * days)
+    if gained > 0 then
+        b.balance = b.balance + gained
+        addBankLog(uname, "Interest +" .. gained .. " sp (" .. days .. "d)")
+    end
+    b.dep_ts = b.dep_ts + days * 86400000
+end
+
+local function applyLoanInterest(uname)
+    local b = getBankAcc(uname)
+    if not b.loan then return end
+    local now  = os.epoch("utc")
+    local days = math.floor((now - b.loan.int_ts) / 86400000)
+    if days > 0 then
+        local interest = math.ceil(b.loan.remaining * (b.loan.rate / 100) * days)
+        b.loan.remaining = b.loan.remaining + interest
+        b.loan.int_ts    = b.loan.int_ts + days * 86400000
+        addBankLog(uname, "Loan interest +" .. interest .. " sp")
+    end
+    if now > b.loan.due_ts and not b.loan.penalized then
+        b.loan.penalized = true
+        b.credit = math.max(0, b.credit - 100)
+        addBankLog(uname, "Loan overdue! Credit -100")
+    end
+end
+
+local function totalDeposits()
+    local t = 0
+    for _, b in pairs(bankData.accounts) do t = t + (b.balance or 0) end
+    return t
+end
+
+local function totalLoans()
+    local t = 0
+    for _, b in pairs(bankData.accounts) do
+        if b.loan then t = t + (b.loan.remaining or 0) end
+    end
+    return t
+end
+
+-- ── Message handler ──────────────────────────────────────────────────────────
+local function handle(cid, msg)
+    if type(msg) ~= "table" then return end
+
+    if msg.type == "login" then
+        local acc = accounts[msg.username]
+        if not acc or acc.password ~= msg.password then
+            rednet.send(cid, { ok=false, err="Invalid credentials" }, PROTOCOL) return
+        end
+        local tok   = makeToken()
+        local admin = acc.isAdmin or msg.username == "admin"
+        sessions[tok] = { username=msg.username, isAdmin=admin, exp=os.time()+3600 }
+        if not admin then addLog(msg.username, "Logged in") end
+        rednet.send(cid, { ok=true, token=tok, isAdmin=admin }, PROTOCOL)
+        print(msg.username .. " logged in")
+        return
+    end
+
+    if msg.type == "debug_peripherals" then
+        rednet.send(cid, { names=peripheral.getNames() }, PROTOCOL) return
+    end
+
+    local sess = getSession(msg.token)
+    if not sess then rednet.send(cid, { err="Session expired" }, PROTOCOL) return end
+    local uname = sess.username
+
+    if msg.type == "list_vault" then
+        local items, err = listVault(uname)
+        rednet.send(cid, { items=items, err=err }, PROTOCOL)
+
+    elseif msg.type == "list_inventory" then
+        local items, err = listInv(uname)
+        rednet.send(cid, { items=items, err=err }, PROTOCOL)
+
+    elseif msg.type == "withdraw" then
+        local ok, r = doWithdraw(uname, msg.name, msg.count or 1)
+        if ok then addLog(uname, "Withdrew x"..r.." "..(msg.displayName or msg.name)) end
+        rednet.send(cid, { ok=ok, err=not ok and r or nil }, PROTOCOL)
+
+    elseif msg.type == "deposit" then
+        local ok, r = doDeposit(uname, msg.name, msg.count or 1)
+        if ok then addLog(uname, "Deposited x"..r.." "..(msg.displayName or msg.name)) end
+        rednet.send(cid, { ok=ok, err=not ok and r or nil }, PROTOCOL)
+
+    elseif msg.type == "get_log" then
+        local acc = accounts[uname]
+        rednet.send(cid, { log=(acc and acc.log) or {} }, PROTOCOL)
+
+    elseif msg.type == "admin_list_users" then
+        if not sess.isAdmin then rednet.send(cid, { err="Not authorized" }, PROTOCOL) return end
+        local list = {}
+        for u, acc in pairs(accounts) do
+            if u ~= "admin" then table.insert(list, { username=u, vault=acc.vault, invmanager=acc.invmanager }) end
+        end
+        rednet.send(cid, { users=list }, PROTOCOL)
+
+    elseif msg.type == "admin_create_user" then
+        if not sess.isAdmin then rednet.send(cid, { err="Not authorized" }, PROTOCOL) return end
+        if accounts[msg.username] then rednet.send(cid, { ok=false, err="User exists" }, PROTOCOL) return end
+        accounts[msg.username] = {
+            password=msg.password, vault=msg.vault,
+            invmanager=msg.invmanager, vaultDir=msg.vaultDir or "back", log={}
+        }
+        save()
+        rednet.send(cid, { ok=true }, PROTOCOL)
+        print("Created user: "..msg.username)
+
+    elseif msg.type == "admin_delete_user" then
+        if not sess.isAdmin then rednet.send(cid, { err="Not authorized" }, PROTOCOL) return end
+        accounts[msg.username] = nil save()
+        rednet.send(cid, { ok=true }, PROTOCOL)
+
+    elseif msg.type == "admin_view_vault" then
+        if not sess.isAdmin then rednet.send(cid, { err="Not authorized" }, PROTOCOL) return end
+        local items, err = listVault(msg.username)
+        rednet.send(cid, { items=items, err=err }, PROTOCOL)
+
+    elseif msg.type == "admin_view_inventory" then
+        if not sess.isAdmin then rednet.send(cid, { err="Not authorized" }, PROTOCOL) return end
+        local items, err = listInv(msg.username)
+        rednet.send(cid, { items=items, err=err }, PROTOCOL)
+
+    elseif msg.type == "admin_withdraw" then
+        if not sess.isAdmin then rednet.send(cid, { err="Not authorized" }, PROTOCOL) return end
+        local ok, r = doWithdraw(msg.username, msg.name, msg.count or 1)
+        rednet.send(cid, { ok=ok, err=not ok and r or nil }, PROTOCOL)
+
+    elseif msg.type == "admin_deposit" then
+        if not sess.isAdmin then rednet.send(cid, { err="Not authorized" }, PROTOCOL) return end
+        local ok, r = doDeposit(msg.username, msg.name, msg.count or 1)
+        rednet.send(cid, { ok=ok, err=not ok and r or nil }, PROTOCOL)
+
+    -- ── Bank handlers ─────────────────────────────────────────────────────────
+    elseif msg.type == "bank_info" then
+        applyDepInterest(uname) applyLoanInterest(uname) saveBank()
+        local b    = getBankAcc(uname)
+        local loan = nil
+        if b.loan then
+            local now = os.epoch("utc")
+            loan = {
+                original  = b.loan.amount,
+                remaining = b.loan.remaining,
+                rate      = b.loan.rate,
+                daysLeft  = math.ceil((b.loan.due_ts - now) / 86400000),
+                overdue   = now > b.loan.due_ts,
+            }
+        end
+        rednet.send(cid, {
+            ok         = true,
+            balance    = b.balance,
+            credit     = b.credit,
+            loan       = loan,
+            loanRate   = getLoanRate(b.credit),
+            loanCap    = math.max(0, math.floor(totalDeposits()*0.4) - totalLoans()),
+            bankSpurs  = countSpurs(BANK_VAULT),
+        }, PROTOCOL)
+
+    elseif msg.type == "bank_deposit" then
+        local acc    = accounts[uname]
+        local b      = getBankAcc(uname)
+        local amount = tonumber(msg.amount) or 0
+        if amount <= 0 then rednet.send(cid, {ok=false, err="Invalid amount"}, PROTOCOL) return end
+        local moved = 0
+        if msg.source == "inventory" then
+            if not acc.invmanager or not peripheral.isPresent(acc.invmanager) then
+                rednet.send(cid, {ok=false, err="No inventory manager"}, PROTOCOL) return
+            end
+            local ok2, n = pcall(function()
+                return peripheral.call(acc.invmanager, "removeItemFromPlayer",
+                    acc.vaultDir or "back", {name=SPUR_ID, count=amount})
+            end)
+            if not ok2 or not n or n == 0 then
+                rednet.send(cid, {ok=false, err="No spurs in inventory"}, PROTOCOL) return
+            end
+            moved = moveSpurs(acc.vault, BANK_VAULT, n)
+            if moved == 0 then
+                -- spurs stuck in user vault - return a partial error
+                rednet.send(cid, {ok=false, err="Moved to your vault but bank transfer failed - deposit from vault"}, PROTOCOL) return
+            end
+        else -- "vault"
+            if not acc.vault or not peripheral.isPresent(acc.vault) then
+                rednet.send(cid, {ok=false, err="No vault"}, PROTOCOL) return
+            end
+            moved = moveSpurs(acc.vault, BANK_VAULT, amount)
+            if moved == 0 then rednet.send(cid, {ok=false, err="No spurs in vault"}, PROTOCOL) return end
+        end
+        applyDepInterest(uname)
+        b.balance = b.balance + moved
+        addBankLog(uname, "Deposited " .. moved .. " sp")
+        saveBank()
+        rednet.send(cid, {ok=true, moved=moved, balance=b.balance}, PROTOCOL)
+        print(uname .. " bank deposit: " .. moved .. " sp")
+
+    elseif msg.type == "bank_withdraw" then
+        local acc    = accounts[uname]
+        local b      = getBankAcc(uname)
+        applyDepInterest(uname)
+        local amount = tonumber(msg.amount) or 0
+        if amount <= 0 then rednet.send(cid, {ok=false, err="Invalid amount"}, PROTOCOL) return end
+        if amount > b.balance then
+            rednet.send(cid, {ok=false, err="Only "..b.balance.." sp in account"}, PROTOCOL) return
+        end
+        if not acc.vault or not peripheral.isPresent(acc.vault) then
+            rednet.send(cid, {ok=false, err="No vault configured"}, PROTOCOL) return
+        end
+        if countSpurs(BANK_VAULT) < amount then
+            rednet.send(cid, {ok=false, err="Bank vault low on reserves"}, PROTOCOL) return
+        end
+        local moved = moveSpurs(BANK_VAULT, acc.vault, amount)
+        if moved == 0 then rednet.send(cid, {ok=false, err="Transfer failed"}, PROTOCOL) return end
+        b.balance = b.balance - moved
+        addBankLog(uname, "Withdrew " .. moved .. " sp")
+        saveBank()
+        rednet.send(cid, {ok=true, moved=moved, balance=b.balance}, PROTOCOL)
+        print(uname .. " bank withdraw: " .. moved .. " sp")
+
+    elseif msg.type == "bank_get_loan" then
+        local acc    = accounts[uname]
+        local b      = getBankAcc(uname)
+        applyLoanInterest(uname)
+        if b.loan then
+            rednet.send(cid, {ok=false, err="Already have an active loan"}, PROTOCOL) return
+        end
+        local rate = getLoanRate(b.credit)
+        if not rate then
+            rednet.send(cid, {ok=false, err="Credit score too low (need 300+)"}, PROTOCOL) return
+        end
+        local amount = math.max(1, math.min(64, tonumber(msg.amount) or 0))
+        local cap    = math.max(0, math.floor(totalDeposits()*0.4) - totalLoans())
+        if amount > cap then
+            rednet.send(cid, {ok=false, err="Bank cannot finance this loan right now"}, PROTOCOL) return
+        end
+        if countSpurs(BANK_VAULT) < amount then
+            rednet.send(cid, {ok=false, err="Bank vault has insufficient reserves"}, PROTOCOL) return
+        end
+        if not acc.vault or not peripheral.isPresent(acc.vault) then
+            rednet.send(cid, {ok=false, err="No vault configured"}, PROTOCOL) return
+        end
+        local moved = moveSpurs(BANK_VAULT, acc.vault, amount)
+        if moved == 0 then rednet.send(cid, {ok=false, err="Transfer failed"}, PROTOCOL) return end
+        local now = os.epoch("utc")
+        b.loan = {
+            amount    = moved,
+            remaining = moved,
+            rate      = rate,
+            taken_ts  = now,
+            due_ts    = now + 5 * 86400000,
+            int_ts    = now,
+            penalized = false,
+        }
+        addBankLog(uname, "Loan: " .. moved .. " sp @ " .. rate .. "%/day, due 5d")
+        saveBank()
+        rednet.send(cid, {ok=true, amount=moved, rate=rate}, PROTOCOL)
+        print(uname .. " took loan: " .. moved .. " sp @ " .. rate .. "%/day")
+
+    elseif msg.type == "bank_pay_loan" then
+        local acc    = accounts[uname]
+        local b      = getBankAcc(uname)
+        applyLoanInterest(uname)
+        if not b.loan then rednet.send(cid, {ok=false, err="No active loan"}, PROTOCOL) return end
+        local amount = math.min(tonumber(msg.amount) or 0, b.loan.remaining)
+        if amount <= 0 then rednet.send(cid, {ok=false, err="Invalid amount"}, PROTOCOL) return end
+        local moved = 0
+        if msg.source == "inventory" then
+            if not acc.invmanager or not peripheral.isPresent(acc.invmanager) then
+                rednet.send(cid, {ok=false, err="No inventory manager"}, PROTOCOL) return
+            end
+            local ok2, n = pcall(function()
+                return peripheral.call(acc.invmanager, "removeItemFromPlayer",
+                    acc.vaultDir or "back", {name=SPUR_ID, count=amount})
+            end)
+            if not ok2 or not n or n == 0 then
+                rednet.send(cid, {ok=false, err="No spurs in inventory"}, PROTOCOL) return
+            end
+            moved = moveSpurs(acc.vault, BANK_VAULT, n)
+        else
+            moved = moveSpurs(acc.vault, BANK_VAULT, amount)
+        end
+        if moved == 0 then rednet.send(cid, {ok=false, err="No spurs to pay with"}, PROTOCOL) return end
+        b.loan.remaining = b.loan.remaining - moved
+        local onTime   = os.epoch("utc") <= b.loan.due_ts
+        local fullPay  = b.loan.remaining <= 0
+        if fullPay then
+            if onTime then
+                b.credit = math.min(900, b.credit + 20)
+                addBankLog(uname, "Loan cleared on time. Credit +20")
+            else
+                b.credit = math.max(0, b.credit - 20)
+                addBankLog(uname, "Loan cleared late. Credit -20")
+            end
+            b.loan = nil
+        else
+            if onTime then
+                b.credit = math.min(900, b.credit + 40)
+                addBankLog(uname, "Paid " .. moved .. " sp. Left: " .. b.loan.remaining .. ". Credit +40")
+            else
+                addBankLog(uname, "Paid " .. moved .. " sp (late). Left: " .. b.loan.remaining)
+            end
+        end
+        saveBank()
+        rednet.send(cid, {
+            ok=true, paid=moved,
+            remaining = b.loan and b.loan.remaining or 0,
+            loanCleared = fullPay,
+            credit = b.credit
+        }, PROTOCOL)
+
+    elseif msg.type == "bank_get_log" then
+        local b = getBankAcc(uname)
+        local out = {}
+        for i = #b.blog, 1, -1 do table.insert(out, b.blog[i]) end
+        rednet.send(cid, {ok=true, log=out}, PROTOCOL)
+
+    elseif msg.type == "admin_bank_overview" then
+        if not sess.isAdmin then rednet.send(cid, {err="Not authorized"}, PROTOCOL) return end
+        local summary = {}
+        for u2, b in pairs(bankData.accounts) do
+            local loan = nil
+            if b.loan then
+                local now = os.epoch("utc")
+                loan = { remaining=b.loan.remaining, overdue=now>b.loan.due_ts,
+                         daysLeft=math.ceil((b.loan.due_ts-now)/86400000) }
+            end
+            table.insert(summary, {username=u2, balance=b.balance, credit=b.credit, loan=loan})
+        end
+        table.sort(summary, function(a,b) return a.username < b.username end)
+        rednet.send(cid, {
+            ok=true, users=summary,
+            total_dep   = totalDeposits(),
+            total_loans = totalLoans(),
+            vault_spurs = countSpurs(BANK_VAULT),
+        }, PROTOCOL)
+    end
+end
+
+print("Cloud server v3 online")
+print("Peripherals: " .. table.concat(peripheral.getNames(), ", "))
+while true do
+    local cid, msg = rednet.receive(PROTOCOL)
+    handle(cid, msg)
+end
