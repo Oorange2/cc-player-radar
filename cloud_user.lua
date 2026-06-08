@@ -834,7 +834,7 @@ local function adminMenu()
         local sel = clickMenu("Cloud Admin", adminItems, msg2)
         msg2 = ""
 
-        if sel == nil or sel == 5 then
+        if sel == nil or sel == 6 then
             token=nil username=nil isAdmin=false return
 
         elseif sel == 1 then
@@ -867,7 +867,7 @@ local function adminMenu()
                 end
                 local ev2, p2, p3, p4 = os.pullEvent()
                 if ev2=="term_resize" then W, H = term.getSize()
-                elseif ev2=="mouse_click" and p3==1 and p4>=W-2 then break
+                elseif ev2=="mouse_click" and p4==1 and p3>=W-2 then break
                 elseif ev2=="mouse_scroll" then scroll=math.max(0,math.min(scroll+p2,math.max(0,#users-listH)))
                 elseif ev2=="key" then
                     if p2==keys.q then break
@@ -983,12 +983,60 @@ local function adminMenu()
                 end
                 local ev2, p2, p3, p4 = os.pullEvent()
                 if ev2=="term_resize" then W, H = term.getSize()
-                elseif ev2=="mouse_click" and p3==1 and p4>=W-2 then break
+                elseif ev2=="mouse_click" and p4==1 and p3>=W-2 then break
                 elseif ev2=="mouse_scroll" then scroll=math.max(0,math.min(scroll+p2,math.max(0,#names-listH)))
                 elseif ev2=="key" then
                     if p2==keys.q then break
                     elseif p2==keys.up   then scroll=math.max(0,scroll-1)
                     elseif p2==keys.down then scroll=math.min(math.max(0,#names-listH),scroll+1) end
+                end
+            end
+
+        elseif sel == 5 then
+            -- Bank overview
+            local res = rpc({type="admin_bank_overview", token=token}, 10)
+            if not res or not res.ok then
+                term.setBackgroundColor(colors.black) term.clear()
+                term.setCursorPos(1,3) term.setTextColor(colors.red)
+                term.write((res and res.err) or "Bank server error")
+                term.setCursorPos(1,5) term.setTextColor(colors.gray) term.write("Press any key...")
+                os.pullEvent("key")
+            else
+                local lines = {}
+                table.insert(lines, "Vault:  " .. (res.vault_spurs or 0) .. " sp")
+                table.insert(lines, "Deps:   " .. (res.total_dep  or 0) .. " sp")
+                table.insert(lines, "Loans:  " .. (res.total_loans or 0) .. " sp")
+                table.insert(lines, string.rep("-", W))
+                for _, u in ipairs(res.users or {}) do
+                    local lstr = u.loan and (" L:"..u.loan.remaining) or ""
+                    local uname = (u.username or "?"):sub(1, math.min(8, W))
+                    table.insert(lines, (uname.." bal:"..u.balance.." cr:"..u.credit..lstr):sub(1,W))
+                end
+                local scroll = 0
+                while true do
+                    W, H = term.getSize()
+                    local lh = H - 2
+                    term.setBackgroundColor(colors.black) term.clear()
+                    term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
+                    term.setCursorPos(1,1) term.clearLine()
+                    term.write(" Bank Overview" .. string.rep(" ", math.max(0, W-17)) .. "[X]")
+                    for row = 1, lh do
+                        local ln = lines[row + scroll]
+                        term.setCursorPos(1, row+1) term.setBackgroundColor(colors.black)
+                        if ln then term.setTextColor(colors.white) term.write(ln:sub(1,W))
+                        else term.setTextColor(colors.black) term.write(string.rep(" ", W)) end
+                    end
+                    if scroll > 0 then term.setCursorPos(W,2) term.setBackgroundColor(colors.gray) term.setTextColor(colors.white) term.write("^") end
+                    if scroll+lh < #lines then term.setCursorPos(W,H) term.setBackgroundColor(colors.gray) term.setTextColor(colors.white) term.write("v") end
+                    local ev2, p2, p3, p4 = os.pullEvent()
+                    if ev2=="term_resize" then W,H=term.getSize()
+                    elseif ev2=="mouse_click" and p4==1 and p3>=W-2 then break
+                    elseif ev2=="mouse_scroll" then scroll=math.max(0,math.min(scroll+p2,math.max(0,#lines-lh)))
+                    elseif ev2=="key" then
+                        if p2==keys.q then break
+                        elseif p2==keys.up then scroll=math.max(0,scroll-1)
+                        elseif p2==keys.down then scroll=math.min(math.max(0,#lines-lh),scroll+1) end
+                    end
                 end
             end
         end
