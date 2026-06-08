@@ -557,7 +557,7 @@ local function bankLoans(info)
             local loan = info.loan
             local dColor = loan.overdue and colors.red or colors.yellow
             term.setCursorPos(2,4) term.setTextColor(dColor)
-            term.write(loan.overdue and "!! OVERDUE !!" or ("Due in "..loan.daysLeft.."d"))
+            term.write((loan.overdue and "!! OVERDUE !!" or ("Due in "..math.max(0,loan.daysLeft).."d")):sub(1,W-2))
             term.setCursorPos(2,5) term.setTextColor(colors.gray)
             term.write("Original:  " .. loan.original .. " sp")
             term.setCursorPos(2,6) term.setTextColor(colors.orange)
@@ -582,7 +582,7 @@ local function bankLoans(info)
             elseif ev=="mouse_click" then
                 local mx,my=p2,p3
                 if my==1 and mx>=W-2 then return end
-                local idx=my-9
+                local idx=my-8
                 if idx>=1 and idx<=#payOpts then
                     local lbl=payOpts[idx].label
                     if lbl=="Back" then return
@@ -641,7 +641,7 @@ local function bankLoans(info)
                 elseif ev=="mouse_click" then
                     local mx,my=p2,p3
                     if my==1 and mx>=W-2 then return end
-                    local idx=my-8
+                    local idx=my-7
                     if idx==2 then return  -- Back
                     elseif idx==1 then
                         -- Get loan
@@ -700,12 +700,12 @@ local function bankMenu()
         term.setTextColor(colors.yellow) term.write(info.balance.." sp")
         term.setCursorPos(2,3) term.setTextColor(colors.gray) term.write("Credit:  ")
         term.setTextColor(creditColor(info.credit))
-        term.write(info.credit.." ("..creditLabel(info.credit)..")")
+        term.write((info.credit.." ("..creditLabel(info.credit)..")"):sub(1,W-10))
         if info.loan then
             local lc=info.loan.overdue and colors.red or colors.orange
             term.setCursorPos(2,4) term.setTextColor(lc)
             local ls=info.loan.overdue and "OVERDUE" or ("due "..info.loan.daysLeft.."d")
-            term.write("Loan: "..info.loan.remaining.." sp ("..ls..")")
+            term.write(("Loan: "..info.loan.remaining.."sp ("..ls..")"):sub(1,W-2))
         end
         local menuItems={
             {label="Deposit",  icon=colors.green},
