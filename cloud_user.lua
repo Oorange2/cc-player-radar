@@ -478,25 +478,34 @@ local function bankBlog()
 end
 
 local function bankDeposit(info)
-    -- Pick source
     local srcItems = {
-        { label="From Inventory", icon=colors.orange },
-        { label="From Cloud Vault", icon=colors.cyan },
-        { label="Back", icon=colors.gray },
+        { label="From Inventory",  icon=colors.orange },
+        { label="From Cloud Vault", icon=colors.cyan  },
+        { label="Back",            icon=colors.gray   },
     }
     local src = clickMenu("Deposit - Source", srcItems)
     if src == nil or src == 3 then return end
     local source = src == 1 and "inventory" or "vault"
-    local available = info.bankSpurs  -- server validates actual availability
+    -- Fetch actual spur count from chosen source
+    local spurCount = 0
+    local fetchRes = rpc({type = src==1 and "list_inventory" or "list_vault", token=token}, 8)
+    for _, item in ipairs((fetchRes and fetchRes.items) or {}) do
+        if item.name == "numismatics:spur" then spurCount = item.count break end
+    end
+    if spurCount == 0 then
+        term.setBackgroundColor(colors.black) term.clear()
+        term.setCursorPos(1,3) term.setTextColor(colors.red)
+        term.write("No spurs in "..(src==1 and "inventory" or "vault"))
+        term.setCursorPos(1,5) term.setTextColor(colors.gray) term.write("Press any key...")
+        os.pullEvent("key") return
+    end
     local amt = amountPicker({
-        title="Deposit to Bank",
-        available=64,
-        max=64,
-        hint= src==1 and "Takes from your inventory" or "Takes from your cloud vault",
+        title  = "Deposit to Bank",
+        available = spurCount,
+        hint   = src==1 and "From your inventory" or "From your cloud vault",
     })
     if not amt then return end
     local res = rpc({type="bank_deposit", token=token, source=source, amount=amt}, 15)
-    -- Show result
     term.setBackgroundColor(colors.black) term.clear()
     term.setCursorPos(1,3)
     if res and res.ok then
