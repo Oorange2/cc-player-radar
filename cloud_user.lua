@@ -555,23 +555,40 @@ local function bankLoans(info)
 
         if info.loan then
             local loan = info.loan
+            -- Row 4: due status
             local dColor = loan.overdue and colors.red or colors.yellow
             term.setCursorPos(2,4) term.setTextColor(dColor)
             term.write((loan.overdue and "!! OVERDUE !!" or ("Due in "..math.max(0,loan.daysLeft).."d")):sub(1,W-2))
+            -- Row 5: original
             term.setCursorPos(2,5) term.setTextColor(colors.gray)
             term.write("Original:  " .. loan.original .. " sp")
+            -- Row 6: remaining
             term.setCursorPos(2,6) term.setTextColor(colors.orange)
             term.write("Remaining: " .. loan.remaining .. " sp")
+            -- Row 7: rate + daily interest
+            local dailyInt = math.ceil(loan.remaining * (loan.rate / 100))
             term.setCursorPos(2,7) term.setTextColor(colors.gray)
-            term.write("Rate: " .. loan.rate .. "%/day")
-            -- Pay buttons
+            term.write(("Rate: "..loan.rate.."%/day  (+"..dailyInt.." sp/day)"):sub(1,W-2))
+            -- Row 8: total owed at due date
+            local daysLeft = math.max(0, loan.daysLeft)
+            if not loan.overdue and daysLeft > 0 then
+                local est = loan.remaining
+                for _=1,daysLeft do est=math.ceil(est*(1+loan.rate/100)) end
+                term.setCursorPos(2,8) term.setTextColor(colors.red)
+                term.write(("At due date: ~"..est.." sp owed"):sub(1,W-2))
+            elseif loan.overdue then
+                term.setCursorPos(2,8) term.setTextColor(colors.red)
+                term.write(("Pay now! Interest growing daily"):sub(1,W-2))
+            end
+            -- Buttons: rows btnStart+1, btnStart+2, btnStart+3
+            local btnStart = 9
             local payOpts = {
                 { label="Pay Amount", icon=colors.yellow },
                 { label="Pay All ("..loan.remaining.." sp)", icon=colors.lime },
                 { label="Back", icon=colors.gray },
             }
             for i,opt in ipairs(payOpts) do
-                term.setCursorPos(1, 8+i)
+                term.setCursorPos(1, btnStart+i)
                 term.setBackgroundColor(opt.icon) term.setTextColor(colors.black) term.write(" ")
                 term.setBackgroundColor(colors.black) term.setTextColor(colors.white)
                 term.write(" "..opt.label..string.rep(" ",math.max(0,W-#opt.label-2)))
@@ -582,7 +599,7 @@ local function bankLoans(info)
             elseif ev=="mouse_click" then
                 local mx,my=p2,p3
                 if my==1 and mx>=W-2 then return end
-                local idx=my-8
+                local idx=my-btnStart
                 if idx>=1 and idx<=#payOpts then
                     local lbl=payOpts[idx].label
                     if lbl=="Back" then return
@@ -590,10 +607,9 @@ local function bankLoans(info)
                         local payAmt
                         if lbl:sub(1,7)=="Pay All" then payAmt=loan.remaining
                         else
-                            payAmt=amountPicker({title="Pay Loan",available=loan.remaining,hint="Paying: "..loan.remaining.." sp total"})
+                            payAmt=amountPicker({title="Pay Loan",available=loan.remaining,hint="Total owed: "..loan.remaining.." sp"})
                         end
                         if payAmt then
-                            -- Pick source
                             local srcOpts={{label="From Vault",icon=colors.cyan},{label="From Inventory",icon=colors.orange}}
                             local s=clickMenu("Pay from?",srcOpts)
                             local src2=(s==2) and "inventory" or "vault"
@@ -611,7 +627,7 @@ local function bankLoans(info)
                             end
                             term.setCursorPos(1,6) term.setTextColor(colors.gray) term.write("Press any key...")
                             os.pullEvent("key")
-                            return  -- refresh by re-entering bankMenu
+                            return
                         end
                     end
                 end
@@ -619,18 +635,26 @@ local function bankLoans(info)
         else
             -- No loan
             if info.loanRate then
+                -- Row 4: rate
                 term.setCursorPos(2,4) term.setTextColor(colors.gray)
-                term.write("Rate: "..info.loanRate.."%/day  |  Max: 64 sp")
+                term.write(("Rate: "..info.loanRate.."%/day  |  Max: 64 sp"):sub(1,W-2))
+                -- Row 5: term
                 term.setCursorPos(2,5) term.setTextColor(colors.gray)
                 term.write("Must repay within 5 days")
-                -- Estimate total at max
+                -- Row 6: total cost for 64sp
                 local est=64
                 for _=1,5 do est=math.ceil(est*(1+info.loanRate/100)) end
                 term.setCursorPos(2,6) term.setTextColor(colors.orange)
-                term.write("64 sp loan costs ~"..est.." sp total")
+                term.write(("64sp over 5d costs ~"..est.." sp"):sub(1,W-2))
+                -- Row 7: daily interest on 64sp
+                local daily=math.ceil(64*(info.loanRate/100))
+                term.setCursorPos(2,7) term.setTextColor(colors.lightBlue)
+                term.write(("Daily interest: +"..daily.." sp/day"):sub(1,W-2))
+                -- Buttons: rows btnStart2+1, btnStart2+2
+                local btnStart2 = 8
                 local lOpts={{label="Get a Loan",icon=colors.green},{label="Back",icon=colors.gray}}
                 for i,opt in ipairs(lOpts) do
-                    term.setCursorPos(1,7+i)
+                    term.setCursorPos(1,btnStart2+i)
                     term.setBackgroundColor(opt.icon) term.setTextColor(colors.black) term.write(" ")
                     term.setBackgroundColor(colors.black) term.setTextColor(colors.white)
                     term.write(" "..opt.label..string.rep(" ",math.max(0,W-#opt.label-2)))
@@ -641,27 +665,31 @@ local function bankLoans(info)
                 elseif ev=="mouse_click" then
                     local mx,my=p2,p3
                     if my==1 and mx>=W-2 then return end
-                    local idx=my-7
+                    local idx=my-btnStart2
                     if idx==2 then return  -- Back
                     elseif idx==1 then
-                        -- Get loan
                         local amt=amountPicker({title="Loan Amount",available=64,
                             hint="Rate: "..info.loanRate.."%/day, 5 day limit"})
                         if amt then
+                            -- Show repayment estimate for chosen amount
                             local res=rpc({type="bank_get_loan",token=token,amount=amt},15)
                             term.setBackgroundColor(colors.black) term.clear()
                             term.setCursorPos(1,3)
                             if res and res.ok then
+                                local repay=amt
+                                for _=1,5 do repay=math.ceil(repay*(1+info.loanRate/100)) end
                                 term.setTextColor(colors.lime)
                                 term.write("Loan of "..res.amount.." sp approved!")
                                 term.setCursorPos(1,4) term.setTextColor(colors.gray)
                                 term.write("Rate: "..res.rate.."%/day  Due in 5 days")
-                                term.setCursorPos(1,5) term.setTextColor(colors.lightBlue)
+                                term.setCursorPos(1,5) term.setTextColor(colors.orange)
+                                term.write(("At due date: ~"..repay.." sp owed"):sub(1,W-2))
+                                term.setCursorPos(1,6) term.setTextColor(colors.lightBlue)
                                 term.write("Coins are in your cloud vault")
                             else
                                 term.setTextColor(colors.red) term.write((res and res.err) or "Failed")
                             end
-                            term.setCursorPos(1,7) term.setTextColor(colors.gray) term.write("Press any key...")
+                            term.setCursorPos(1,8) term.setTextColor(colors.gray) term.write("Press any key...")
                             os.pullEvent("key")
                             return
                         end
@@ -670,9 +698,9 @@ local function bankLoans(info)
             else
                 term.setCursorPos(2,4) term.setTextColor(colors.red)
                 term.write("Credit too low for loans (need 300+)")
-                term.setCursorPos(2,6) term.setTextColor(colors.gray) term.write("Q=back")
-                local ev,p1=os.pullEvent("key")
-                if p1==keys.q then return end
+                term.setCursorPos(2,6) term.setTextColor(colors.gray) term.write("Press any key or Q...")
+                local ev,p1,p2,p3=os.pullEvent()
+                if ev=="key" or ev=="mouse_click" then return end
             end
         end
     end
