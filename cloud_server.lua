@@ -383,7 +383,7 @@ local function handle(cid, msg)
             credit     = b.credit,
             loan       = loan,
             loanRate   = getLoanRate(b.credit),
-            loanCap    = math.max(0, math.floor(totalDeposits()*0.4) - totalLoans()),
+            loanCap    = math.max(0, math.floor(countSpurs(BANK_VAULT)*0.4) - totalLoans()),
             bankSpurs  = countSpurs(BANK_VAULT),
         }, PROTOCOL)
 
@@ -458,7 +458,7 @@ local function handle(cid, msg)
             rednet.send(cid, {ok=false, err="Credit score too low (need 300+)"}, PROTOCOL) return
         end
         local amount = math.max(1, math.min(64, tonumber(msg.amount) or 0))
-        local cap    = math.max(0, math.floor(totalDeposits()*0.4) - totalLoans())
+        local cap    = math.max(0, math.floor(countSpurs(BANK_VAULT)*0.4) - totalLoans())
         if amount > cap then
             rednet.send(cid, {ok=false, err="Bank cannot finance this loan right now"}, PROTOCOL) return
         end
@@ -510,23 +510,27 @@ local function handle(cid, msg)
         end
         if moved == 0 then rednet.send(cid, {ok=false, err="No spurs to pay with"}, PROTOCOL) return end
         b.loan.remaining = b.loan.remaining - moved
-        local onTime   = os.epoch("utc") <= b.loan.due_ts
+        local now2     = os.epoch("utc")
+        local onTime   = now2 <= b.loan.due_ts
+        local heldDay  = (now2 - b.loan.taken_ts) >= 86400000
         local fullPay  = b.loan.remaining <= 0
         if fullPay then
-            if onTime then
+            if onTime and heldDay then
                 b.credit = math.min(900, b.credit + 20)
                 addBankLog(uname, "Loan cleared on time. Credit +20")
-            else
+            elseif not onTime then
                 b.credit = math.max(0, b.credit - 20)
                 addBankLog(uname, "Loan cleared late. Credit -20")
+            else
+                addBankLog(uname, "Loan cleared (held <1d, no credit change)")
             end
             b.loan = nil
         else
-            if onTime then
+            if onTime and heldDay then
                 b.credit = math.min(900, b.credit + 40)
                 addBankLog(uname, "Paid " .. moved .. " sp. Left: " .. b.loan.remaining .. ". Credit +40")
             else
-                addBankLog(uname, "Paid " .. moved .. " sp (late). Left: " .. b.loan.remaining)
+                addBankLog(uname, "Paid " .. moved .. " sp. Left: " .. b.loan.remaining)
             end
         end
         saveBank()
