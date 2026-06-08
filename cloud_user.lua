@@ -558,7 +558,7 @@ local function bankLoans(info)
             -- Row 4: due status
             local dColor = loan.overdue and colors.red or colors.yellow
             term.setCursorPos(2,4) term.setTextColor(dColor)
-            term.write((loan.overdue and "!! OVERDUE !!" or ("Due in "..math.max(0,loan.daysLeft).."d")):sub(1,W-2))
+            term.write((loan.overdue and "!! OVERDUE !!" or ("Due in "..math.max(0,loan.daysLeft).." irl days")):sub(1,W-2))
             -- Row 5: original
             term.setCursorPos(2,5) term.setTextColor(colors.gray)
             term.write("Original:  " .. loan.original .. " sp")
@@ -640,12 +640,12 @@ local function bankLoans(info)
                 term.write(("Rate: "..info.loanRate.."%/day  |  Max: 64 sp"):sub(1,W-2))
                 -- Row 5: term
                 term.setCursorPos(2,5) term.setTextColor(colors.gray)
-                term.write("Must repay within 5 days")
+                term.write("Must repay within 5 irl days")
                 -- Row 6: total cost for 64sp
                 local est=64
                 for _=1,5 do est=math.ceil(est*(1+info.loanRate/100)) end
                 term.setCursorPos(2,6) term.setTextColor(colors.orange)
-                term.write(("64sp over 5d costs ~"..est.." sp"):sub(1,W-2))
+                term.write(("64sp / 5 irl days = ~"..est.." sp"):sub(1,W-2))
                 -- Row 7: daily interest on 64sp
                 local daily=math.ceil(64*(info.loanRate/100))
                 term.setCursorPos(2,7) term.setTextColor(colors.lightBlue)
@@ -669,7 +669,7 @@ local function bankLoans(info)
                     if idx==2 then return  -- Back
                     elseif idx==1 then
                         local amt=amountPicker({title="Loan Amount",available=64,
-                            hint="Rate: "..info.loanRate.."%/day, 5 day limit"})
+                            hint="Rate: "..info.loanRate.."%/day, 5 irl day limit"})
                         if amt then
                             -- Show repayment estimate for chosen amount
                             local res=rpc({type="bank_get_loan",token=token,amount=amt},15)
@@ -681,7 +681,7 @@ local function bankLoans(info)
                                 term.setTextColor(colors.lime)
                                 term.write("Loan of "..res.amount.." sp approved!")
                                 term.setCursorPos(1,4) term.setTextColor(colors.gray)
-                                term.write("Rate: "..res.rate.."%/day  Due in 5 days")
+                                term.write(("Rate: "..res.rate.."%/day  5 irl days"):sub(1,W-2))
                                 term.setCursorPos(1,5) term.setTextColor(colors.orange)
                                 term.write(("At due date: ~"..repay.." sp owed"):sub(1,W-2))
                                 term.setCursorPos(1,6) term.setTextColor(colors.lightBlue)
@@ -726,13 +726,24 @@ local function bankMenu()
         term.setBackgroundColor(colors.black)
         term.setCursorPos(2,2) term.setTextColor(colors.gray) term.write("Balance: ")
         term.setTextColor(colors.yellow) term.write(info.balance.." sp")
-        term.setCursorPos(2,3) term.setTextColor(colors.gray) term.write("Credit:  ")
+        -- Row 3: daily deposit interest
+        term.setCursorPos(2,3)
+        if info.balance > 0 then
+            local dailyDep = math.max(1, math.floor(info.balance * 0.02))
+            term.setTextColor(colors.lime)
+            term.write(("+"..dailyDep.." sp/day  (2%/day)"):sub(1,W-2))
+        else
+            term.setTextColor(colors.gray) term.write("Deposit coins to earn interest")
+        end
+        -- Row 4: credit score
+        term.setCursorPos(2,4) term.setTextColor(colors.gray) term.write("Credit:  ")
         term.setTextColor(creditColor(info.credit))
         term.write((info.credit.." ("..creditLabel(info.credit)..")"):sub(1,W-10))
+        -- Row 5: active loan summary (if any)
         if info.loan then
             local lc=info.loan.overdue and colors.red or colors.orange
-            term.setCursorPos(2,4) term.setTextColor(lc)
-            local ls=info.loan.overdue and "OVERDUE" or ("due "..info.loan.daysLeft.."d")
+            term.setCursorPos(2,5) term.setTextColor(lc)
+            local ls=info.loan.overdue and "OVERDUE" or ("due "..info.loan.daysLeft.." irl days")
             term.write(("Loan: "..info.loan.remaining.."sp ("..ls..")"):sub(1,W-2))
         end
         local menuItems={
