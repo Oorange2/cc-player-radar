@@ -1,6 +1,10 @@
 -- vault_setup.lua
--- Type each vault/barrel/packager ID manually, station by station.
+-- Type the number for each vault/barrel/packager, station by station.
 -- Type "done" at the vault prompt (or leave blank) to finish and save.
+
+local VAULT_PREFIX    = "create:item_vault_"
+local BARREL_PREFIX   = "minecraft:barrel_"
+local PACKAGER_PREFIX = "Create_Packager_"
 
 local function header(title)
     term.setBackgroundColor(colors.blue)
@@ -12,12 +16,15 @@ local function header(title)
     term.setTextColor(colors.white)
 end
 
-local function prompt(label)
+local function prompt(label, prefix)
     term.setTextColor(colors.yellow)
-    io.write("  " .. label .. ": ")
+    io.write("  " .. label .. " #: ")
+    term.setTextColor(colors.gray)
+    io.write(prefix)
     term.setTextColor(colors.white)
     local val = read()
-    return val:match("^%s*(.-)%s*$")  -- trim whitespace
+    val = val:match("^%s*(.-)%s*$")  -- trim whitespace
+    return prefix .. val, val
 end
 
 -- ─── Main loop ────────────────────────────────────────────────────────────────
@@ -32,14 +39,14 @@ while true do
 
     term.setCursorPos(1, 3)
     term.setTextColor(colors.gray)
-    print("  Enter IDs exactly as shown by peripheral.getNames()")
-    print("  Leave Vault ID blank (or type 'done') to finish.\n")
+    print("  Just type the number for each peripheral.")
+    print("  Leave Vault # blank (or type 'done') to finish.\n")
 
-    local v = prompt("Vault ID")
-    if v == "" or v:lower() == "done" then break end
+    local v, vn = prompt("Vault",    VAULT_PREFIX)
+    if vn == "" or vn:lower() == "done" then break end
 
-    local b = prompt("Barrel ID")
-    local p = prompt("Packager ID")
+    local b = prompt("Barrel",   BARREL_PREFIX)
+    local p = prompt("Packager", PACKAGER_PREFIX)
 
     -- Confirm
     term.setCursorPos(1, 9)
