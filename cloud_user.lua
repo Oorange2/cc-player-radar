@@ -742,7 +742,7 @@ local function userMenu()
     }
     while true do
         local sel = clickMenu("Cloud - " .. username, menuItems)
-        if sel == nil or sel == 4 then token=nil username=nil isAdmin=false return
+        if sel == nil or sel == 5 then token=nil username=nil isAdmin=false return
         elseif sel == 1 then
             itemListUI({ title="Withdraw", actionLabel="Withdrew",
                 fetchFn=function() local r=rpc({type="list_vault",token=token}) return r or {} end,
@@ -757,6 +757,8 @@ local function userMenu()
                     return r and r.ok, r and r.err end })
         elseif sel == 3 then
             logScreen()
+        elseif sel == 4 then
+            bankMenu()
         end
     end
 end
