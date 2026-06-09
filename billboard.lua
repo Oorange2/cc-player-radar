@@ -106,7 +106,7 @@ local function drawMain()
     regBtn(1, W, H-1, function() page="tutorial" tutPage=1 end)
     div(H-2, "-", colors.gray)
     fillRow(H-3, colors.gray, colors.white,  "Contact  cypu  or  ooranges  to join")
-    fillRow(H-4, colors.gray, colors.yellow, "First-time setup: only 5 Spurs!")
+    fillRow(H-4, colors.gray, colors.yellow, "First-time setup: only 6 Spurs!")
     div(H-5, "=", colors.gray)
 
     -- ── TOP-ANCHORED header (rows 1-3) ──
@@ -169,12 +169,12 @@ local tutContent = {
         div(2, "=", colors.green)
 
         lw(3,  "Requirements:", colors.yellow)
-        lw(4,  "  5 Numismatic Spurs in your inventory", colors.white)
+        lw(4,  "  6 Numismatic Spurs in your inventory", colors.white)
 
         div(5, "-", colors.gray)
         lw(6,  "Steps:", colors.yellow)
         lw(7,  "  1. Find an admin and ask to sign up", colors.white)
-        lw(8,  "  2. Give them 5 Spurs as the setup fee", colors.white)
+        lw(8,  "  2. Give them 6 Spurs as the setup fee", colors.white)
         lw(9,  "  3. Admin creates your account & links", colors.white)
         lw(10, "     your personal item vault for you", colors.white)
         lw(11, "  4. Log in at the terminal below this", colors.white)
