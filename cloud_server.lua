@@ -876,22 +876,27 @@ local function handle(cid, msg)
             table.insert(summary, {username=u2, balance=b.balance, credit=b.credit, loan=loan})
         end
         table.sort(summary, function(a,b) return a.username < b.username end)
-        local vspurs   = countVaultValue(BANK_VAULT)
-        local tdep     = totalDeposits()
-        local tloans   = totalLoans()
-        local daily_int = 0
+        local vspurs       = countVaultValue(BANK_VAULT)
+        local tdep         = totalDeposits()
+        local tloans       = totalLoans()
+        local daily_loan_int = 0
+        local daily_dep_int  = 0
         for _, b in pairs(bankData.accounts) do
             if b.loan then
-                daily_int = daily_int + math.ceil(b.loan.remaining * (b.loan.rate / 100))
+                daily_loan_int = daily_loan_int + math.ceil(b.loan.remaining * (b.loan.rate / 100))
+            end
+            if (b.balance or 0) > 0 then
+                daily_dep_int = daily_dep_int + math.floor(b.balance * 0.02)
             end
         end
         rednet.send(cid, {
             ok=true, users=summary,
-            total_dep    = tdep,
-            total_loans  = tloans,
-            vault_spurs  = vspurs,
-            bank_balance = vspurs - tdep,
-            daily_int    = daily_int,
+            total_dep      = tdep,
+            total_loans    = tloans,
+            vault_spurs    = vspurs,
+            bank_balance   = vspurs - tdep,
+            daily_loan_int = daily_loan_int,
+            daily_dep_int  = daily_dep_int,
         }, PROTOCOL)
     end
 end
