@@ -550,12 +550,7 @@ local function bankWithdraw(info)
     if res and res.ok then
         term.setTextColor(colors.lime) term.write("Withdrew "..res.moved.." sp!")
         term.setCursorPos(1,4) term.setTextColor(colors.gray) term.write("New balance: "..res.balance.." sp")
-        term.setCursorPos(1,5)
-        if res.inVault then
-            term.setTextColor(colors.yellow) term.write("Inv full - coins in cloud vault")
-        else
-            term.setTextColor(colors.lime) term.write("Coins sent to your inventory!")
-        end
+        term.setCursorPos(1,5) term.setTextColor(colors.lime) term.write("Coins sent to your inventory!")
     else
         term.setTextColor(colors.red) term.write((res and res.err) or "Failed")
     end
