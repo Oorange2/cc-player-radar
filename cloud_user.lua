@@ -542,7 +542,7 @@ local function bankWithdraw(info)
         term.setCursorPos(1,5) term.setTextColor(colors.gray) term.write("Press any key...")
         os.pullEvent("key") return
     end
-    local amt = amountPicker({title="Withdraw from Bank", available=info.balance, hint="Coins go to your cloud vault"})
+    local amt = amountPicker({title="Withdraw from Bank", available=info.balance, hint="Coins sent directly to your inventory"})
     if not amt then return end
     local res = rpc({type="bank_withdraw", token=token, amount=amt}, 15)
     term.setBackgroundColor(colors.black) term.clear()
@@ -552,7 +552,7 @@ local function bankWithdraw(info)
         term.setCursorPos(1,4) term.setTextColor(colors.gray) term.write("New balance: "..res.balance.." sp")
         term.setCursorPos(1,5)
         if res.inVault then
-            term.setTextColor(colors.yellow) term.write("Coins in your vault (inv full)")
+            term.setTextColor(colors.yellow) term.write("Inv full - coins in cloud vault")
         else
             term.setTextColor(colors.lime) term.write("Coins sent to your inventory!")
         end
