@@ -25,7 +25,7 @@ local W, H = mon.getSize()
 -- ── State ─────────────────────────────────────────────────────────────────────
 local page    = "main"
 local tutPage = 1
-local NUM_TUT = 3
+local NUM_TUT = 4
 local btns    = {}
 
 -- ── Drawing helpers ───────────────────────────────────────────────────────────
@@ -120,9 +120,9 @@ local function drawMain()
         { colors.cyan,      "DEPOSIT / WITHDRAW",  "Drop off or pick up from a pocket PC"   },
         { colors.yellow,    "BANKING",             "2%/day interest on deposited Spurs"      },
         { colors.orange,    "LOANS",               "Borrow spurs, repay in 5 irl days"      },
+        { colors.pink,      "MARKETPLACE",         "Buy & sell items with other players"     },
         { colors.magenta,   "CREDIT SCORE",        "Good history = lower loan rates"         },
         { colors.lightBlue, "ACTIVITY LOG",        "Every transaction on record"             },
-        { colors.green,     "EARN SPURS",          "Do /missions in-game to earn coins!"     },
     }
 
     local svcTop = 4
@@ -241,6 +241,30 @@ local tutContent = {
         lw(15, "CREDIT SCORE TIERS", colors.magenta)
         lw(16, "  300+ Eligible  |  600+ Good  |  800+ Excellent", colors.white)
         lw(17, "  Better score = lower loan interest rate.", colors.lightGray)
+    end,
+
+    -- ── Page 4: Marketplace Guide ─────────────────────────────────────────────
+    function()
+        fillRow(1, colors.pink, colors.black, "MARKETPLACE GUIDE")
+        div(2, "=", colors.pink)
+
+        lw(3,  "BUYING ITEMS", colors.lime)
+        lw(4,  "  Open the Market tab on your pocket PC.", colors.white)
+        lw(5,  "  Browse listings and tap to see details.", colors.white)
+        lw(6,  "  Payment is taken from your bank balance.", colors.white)
+        lw(7,  "  Items are delivered straight to your vault.", colors.lime)
+
+        div(8, "-", colors.gray)
+        lw(9,  "SELLING ITEMS", colors.yellow)
+        lw(10, "  Go to My Listings and create a listing.", colors.white)
+        lw(11, "  Set a lot size (items per purchase) & price.", colors.white)
+        lw(12, "  Add stock from your inventory or vault.", colors.white)
+        lw(13, "  5% market tax deducted from each sale.", colors.orange)
+
+        div(14, "-", colors.gray)
+        lw(15, "NOTES", colors.lightGray)
+        lw(16, "  Listings with no stock for 3+ days are", colors.lightGray)
+        lw(17, "  removed automatically. Keep stock topped up!", colors.lightGray)
     end,
 }
 
