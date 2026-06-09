@@ -10,6 +10,16 @@ rednet.open(modemSide)
 
 local W, H     = term.getSize()
 pcall(term.setPaletteColor, colors.orange, 0xCC6600)
+
+local DENOMS = {
+    {name="numismatics:sun",      label="Sun",      value=4096},
+    {name="numismatics:crown",    label="Crown",    value=512},
+    {name="numismatics:cog",      label="Cog",      value=64},
+    {name="numismatics:sprocket", label="Sprocket", value=16},
+    {name="numismatics:bevel",    label="Bevel",    value=8},
+    {name="numismatics:spur",     label="Spur",     value=1},
+}
+
 local serverId = nil
 local token    = nil
 local username = nil
@@ -443,6 +453,115 @@ local function amountPicker(cfg)
     end
 end
 
+-- Multi-denomination coin picker
+-- cfg: { title, coins[{name,label,value,available}], target(sp, optional),
+--        confirmLabel, preset({[name]=count}, optional) }
+-- Returns {[name]=count} or nil
+local function coinPickerUI(cfg)
+    if #cfg.coins == 0 then return nil end
+    local counts = {}
+    for _, c in ipairs(cfg.coins) do
+        counts[c.name] = (cfg.preset and cfg.preset[c.name]) or 0
+    end
+    local LIST_TOP = 3
+
+    local function totalSp()
+        local t = 0
+        for _, c in ipairs(cfg.coins) do t = t + (counts[c.name] or 0) * c.value end
+        return t
+    end
+
+    while true do
+        W, H = term.getSize()
+        term.setBackgroundColor(colors.black) term.clear()
+        -- Header
+        term.setBackgroundColor(colors.orange) term.setTextColor(colors.white)
+        term.setCursorPos(1,1) term.clearLine()
+        local hdr = " "..cfg.title
+        if #hdr > W-3 then hdr = hdr:sub(1,W-3) end
+        term.write(hdr..string.rep(" ",math.max(0,W-#hdr-3)).."[X]")
+        -- Total line
+        term.setBackgroundColor(colors.black)
+        term.setCursorPos(1,2) term.clearLine()
+        local sp = totalSp()
+        if cfg.target then
+            local diff = cfg.target - sp
+            term.setTextColor(colors.gray) term.write(" "..sp.."/"..cfg.target.."sp ")
+            if diff == 0 then
+                term.setTextColor(colors.lime) term.write("OK!")
+            elseif diff > 0 then
+                term.setTextColor(colors.orange) term.write("need "..diff.." more")
+            else
+                term.setTextColor(colors.red) term.write("over by "..(-diff).."!")
+            end
+        else
+            term.setTextColor(colors.gray) term.write(" Total: ")
+            term.setTextColor(colors.yellow) term.write(sp.." sp")
+        end
+        -- Coin rows
+        for i, c in ipairs(cfg.coins) do
+            local y = LIST_TOP + i - 1
+            if y >= H-1 then break end
+            term.setCursorPos(1,y) term.setBackgroundColor(colors.black) term.clearLine()
+            local cnt = counts[c.name] or 0
+            local rightStr = "x"..cnt.."/"..c.available
+            local leftStr  = c.label.." "..c.value.."sp"
+            local gap = math.max(1, W - 2 - #leftStr - #rightStr)
+            term.setTextColor(itemColor(c.name)) term.write("■ ")
+            term.setTextColor(colors.white) term.write(leftStr:sub(1, W-2-#rightStr-1))
+            term.setTextColor(colors.gray) term.write(string.rep(" ", gap))
+            term.setTextColor(colors.yellow) term.write(rightStr)
+        end
+        -- Hint
+        local hintY = LIST_TOP + #cfg.coins
+        if hintY < H-1 then
+            term.setCursorPos(1,hintY) term.setBackgroundColor(colors.black)
+            term.setTextColor(colors.gray) term.write(" scroll a row to adjust")
+        end
+        -- Buttons
+        local canConfirm = (not cfg.target and totalSp()>0) or (cfg.target and totalSp()==cfg.target)
+        term.setCursorPos(1,H-1) term.setBackgroundColor(colors.black) term.clearLine()
+        local confirmLbl = " "..(cfg.confirmLabel or "Confirm").." "
+        if canConfirm then
+            term.setBackgroundColor(colors.white) term.setTextColor(colors.black)
+        else
+            term.setBackgroundColor(colors.gray) term.setTextColor(colors.lightGray)
+        end
+        term.write(confirmLbl)
+        term.setBackgroundColor(colors.black) term.write("  ")
+        term.setBackgroundColor(colors.red) term.setTextColor(colors.white) term.write(" Cancel ")
+        term.setCursorPos(1,H) term.setBackgroundColor(colors.black) term.write(string.rep(" ",W))
+
+        local ev,p1,p2,p3 = os.pullEvent()
+        if ev=="term_resize" then W,H=term.getSize()
+        elseif ev=="mouse_click" then
+            local mx,my = p2,p3
+            if my==1 and mx>=W-2 then return nil end
+            if my==H-1 then
+                if canConfirm and mx>=1 and mx<=#confirmLbl then return counts end
+                if mx>=#confirmLbl+3 then return nil end
+            end
+        elseif ev=="mouse_scroll" then
+            local dir,mx,my = p1,p2,p3
+            local row = my - LIST_TOP + 1
+            if row>=1 and row<=#cfg.coins then
+                local c = cfg.coins[row]
+                local cur = counts[c.name] or 0
+                local newVal = math.max(0, math.min(c.available, cur - dir))
+                if cfg.target then
+                    local otherSp = totalSp() - cur * c.value
+                    local maxHere = math.floor(math.max(0, cfg.target - otherSp) / c.value)
+                    newVal = math.min(newVal, maxHere)
+                end
+                counts[c.name] = newVal
+            end
+        elseif ev=="key" then
+            if p1==keys.q then return nil
+            elseif p1==keys.enter and canConfirm then return counts end
+        end
+    end
+end
+
 local function bankBlog()
     local res = rpc({type="bank_get_log", token=token})
     local log = (res and res.log) or {}
@@ -499,33 +618,35 @@ end
 
 local function bankDeposit(info)
     local srcItems = {
-        { label="From Inventory",  icon=colors.orange },
-        { label="From Cloud Vault", icon=colors.cyan  },
-        { label="Back",            icon=colors.gray   },
+        {label="From Inventory",   icon=colors.orange},
+        {label="From Cloud Vault", icon=colors.cyan  },
+        {label="Back",             icon=colors.gray  },
     }
     local src = clickMenu("Deposit - Source", srcItems)
-    if src == nil or src == 3 then return end
-    local source = src == 1 and "inventory" or "vault"
-    -- Fetch actual spur count from chosen source
-    local spurCount = 0
-    local fetchRes = rpc({type = src==1 and "list_inventory" or "list_vault", token=token}, 8)
-    for _, item in ipairs((fetchRes and fetchRes.items) or {}) do
-        if item.name == "numismatics:spur" then spurCount = item.count break end
+    if src==nil or src==3 then return end
+    local source = src==1 and "inventory" or "vault"
+    -- Fetch items from chosen source and filter to coins
+    local fetchRes = rpc({type=src==1 and "list_inventory" or "list_vault",token=token}, 8)
+    local allItems = (fetchRes and fetchRes.items) or {}
+    local coinItems = {}
+    for _, d in ipairs(DENOMS) do
+        for _, item in ipairs(allItems) do
+            if item.name==d.name and item.count>0 then
+                table.insert(coinItems,{name=d.name,label=d.label,value=d.value,available=item.count})
+                break
+            end
+        end
     end
-    if spurCount == 0 then
+    if #coinItems==0 then
         term.setBackgroundColor(colors.black) term.clear()
         term.setCursorPos(1,3) term.setTextColor(colors.red)
-        term.write("No spurs in "..(src==1 and "inventory" or "vault"))
+        term.write("No coins in "..(src==1 and "inventory" or "vault"))
         term.setCursorPos(1,5) term.setTextColor(colors.gray) term.write("Press any key...")
         os.pullEvent() return
     end
-    local amt = amountPicker({
-        title  = "Deposit to Bank",
-        available = spurCount,
-        hint   = src==1 and "From your inventory" or "From your cloud vault",
-    })
-    if not amt then return end
-    local res = rpc({type="bank_deposit", token=token, source=source, amount=amt}, 15)
+    local sel = coinPickerUI({title="Deposit to Bank",coins=coinItems,confirmLabel="Deposit"})
+    if not sel then return end
+    local res = rpc({type="bank_deposit",token=token,source=source,coins=sel}, 15)
     term.setBackgroundColor(colors.black) term.clear()
     term.setCursorPos(1,3)
     if res and res.ok then
@@ -545,15 +666,58 @@ local function bankWithdraw(info)
         term.setCursorPos(1,5) term.setTextColor(colors.gray) term.write("Press any key...")
         os.pullEvent() return
     end
-    local amt = amountPicker({title="Withdraw from Bank", available=info.balance, hint="Coins sent directly to your inventory"})
+    -- Step 1: pick total amount
+    local amt = amountPicker({title="Withdraw Amount",available=info.balance,hint="Pick denomination breakdown next"})
     if not amt then return end
-    local res = rpc({type="bank_withdraw", token=token, amount=amt}, 15)
+    -- Step 2: build coin list from what bank actually has
+    local bankDenoms = info.bankDenoms or {}
+    local coinItems = {}
+    for _, d in ipairs(DENOMS) do
+        local have = bankDenoms[d.name] or 0
+        if have > 0 then
+            table.insert(coinItems,{name=d.name,label=d.label,value=d.value,available=have})
+        end
+    end
+    if #coinItems==0 then
+        term.setBackgroundColor(colors.black) term.clear()
+        term.setCursorPos(1,3) term.setTextColor(colors.red) term.write("Bank vault has no coins!")
+        term.setCursorPos(1,5) term.setTextColor(colors.gray) term.write("Press any key...")
+        os.pullEvent() return
+    end
+    -- Auto-suggest greedy breakdown (largest first)
+    local preset = {}
+    local remaining = amt
+    for _, d in ipairs(DENOMS) do
+        if remaining<=0 then break end
+        local have = bankDenoms[d.name] or 0
+        if have>0 and d.value<=remaining then
+            local take = math.min(have, math.floor(remaining/d.value))
+            preset[d.name] = take
+            remaining = remaining - take * d.value
+        end
+    end
+    if remaining > 0 then
+        term.setBackgroundColor(colors.black) term.clear()
+        term.setCursorPos(1,3) term.setTextColor(colors.red)
+        term.write("Bank can't make "..amt.."sp exactly")
+        term.setCursorPos(1,4) term.setTextColor(colors.gray) term.write("(needs smaller denominations)")
+        term.setCursorPos(1,6) term.setTextColor(colors.gray) term.write("Press any key...")
+        os.pullEvent() return
+    end
+    -- Step 3: coin picker with target and auto-filled preset
+    local sel = coinPickerUI({
+        title="Withdraw "..amt.."sp",
+        coins=coinItems,target=amt,
+        confirmLabel="Withdraw",preset=preset,
+    })
+    if not sel then return end
+    local res = rpc({type="bank_withdraw",token=token,coins=sel}, 15)
     term.setBackgroundColor(colors.black) term.clear()
     term.setCursorPos(1,3)
     if res and res.ok then
         term.setTextColor(colors.lime) term.write("Withdrew "..res.moved.." sp!")
         term.setCursorPos(1,4) term.setTextColor(colors.gray) term.write("New balance: "..res.balance.." sp")
-        term.setCursorPos(1,5) term.setTextColor(colors.lime) term.write("Coins sent to your inventory!")
+        term.setCursorPos(1,5) term.setTextColor(colors.lime) term.write("Coins sent to inventory!")
     else
         term.setTextColor(colors.red) term.write((res and res.err) or "Failed")
     end
