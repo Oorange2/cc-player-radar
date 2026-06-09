@@ -92,59 +92,70 @@ local function drawMain()
     W, H = mon.getSize()
     cls() btns = {}
 
-    -- ── Header (rows 1-2) ──
-    fillRow(1, colors.blue,  colors.white,     "CLOUD  SOLUTIONS")
-    fillRow(2, colors.blue,  colors.lightBlue, "Secure Vaults & Banking  |  CC:Tweaked")
+    -- ── BOTTOM-ANCHORED fixed rows (always visible) ──
+    -- H   : footer
+    -- H-1 : CTA button
+    -- H-2 : divider
+    -- H-3 : contact
+    -- H-4 : pricing
+    -- H-5 : divider
+
+    fillRow(H,   colors.black, colors.gray, "Cloud Solutions  --  Always Online")
+    fillRow(H-1, colors.blue)
+    cw(H-1, "[ Click Here  --  Controls & Setup Guide ]", colors.white, colors.blue)
+    regBtn(1, W, H-1, function() page="tutorial" tutPage=1 end)
+    div(H-2, "-", colors.gray)
+    fillRow(H-3, colors.gray, colors.white,  "Contact  cypu  or  ooranges  to join")
+    fillRow(H-4, colors.gray, colors.yellow, "First-time setup: only 5 Spurs!")
+    div(H-5, "=", colors.gray)
+
+    -- ── TOP-ANCHORED header (rows 1-3) ──
+    fillRow(1, colors.blue, colors.white,     "CLOUD  SOLUTIONS")
+    fillRow(2, colors.blue, colors.lightBlue, "Secure Vaults & Banking  |  CC:Tweaked")
     div(3, "=", colors.cyan)
 
-    -- ── Service list (rows 4 onward) ──
+    -- ── Services: fill rows 4 .. H-6 ──
     local svcs = {
-        { colors.lime,      "VAULT STORAGE",   "Keep your items safe & always accessible"  },
-        { colors.cyan,      "DEPOSIT / WITHDRAW", "Move items between your vault and pocket" },
-        { colors.yellow,    "BANKING",         "2%/day interest on every Spur you deposit" },
-        { colors.orange,    "LOANS",           "Borrow spurs, repay within 5 irl days"     },
-        { colors.magenta,   "CREDIT SCORE",    "Good history = better loan rates"          },
-        { colors.lightBlue, "ACTIVITY LOG",    "Every transaction, always on record"       },
+        { colors.lime,      "VAULT STORAGE",      "Your items, locked away safely"          },
+        { colors.cyan,      "DEPOSIT / WITHDRAW",  "Drop off or pick up from a pocket PC"   },
+        { colors.yellow,    "BANKING",             "2%/day interest on deposited Spurs"      },
+        { colors.orange,    "LOANS",               "Borrow spurs, repay in 5 irl days"      },
+        { colors.magenta,   "CREDIT SCORE",        "Good history = lower loan rates"         },
+        { colors.lightBlue, "ACTIVITY LOG",        "Every transaction on record"             },
     }
 
-    local svcStart = 4
-    for i, s in ipairs(svcs) do
-        local y = svcStart + (i - 1) * 2
+    local svcTop = 4
+    local svcBot = H - 6        -- last usable row before bottom block
+    local svcRows = svcBot - svcTop + 1
+    local rowsPer = math.floor(svcRows / #svcs)  -- rows per service (1 or 2)
 
-        -- Colored label
+    for i, s in ipairs(svcs) do
+        local y = svcTop + (i - 1) * rowsPer
+        if y > svcBot then break end
+
+        -- Label row
         mon.setCursorPos(2, y)
         mon.setBackgroundColor(colors.black) mon.setTextColor(s[1])
-        mon.write((">> " .. s[2]):sub(1, W - 2))
-
-        -- Description
-        mon.setCursorPos(4, y + 1)
-        mon.setBackgroundColor(colors.black) mon.setTextColor(colors.lightGray)
-        mon.write(s[3]:sub(1, W - 4))
+        if rowsPer >= 2 then
+            -- Two-row format: label then description
+            mon.write((">> " .. s[2]):sub(1, W - 2))
+            if y + 1 <= svcBot then
+                mon.setCursorPos(4, y + 1)
+                mon.setTextColor(colors.lightGray)
+                mon.write(s[3]:sub(1, W - 4))
+            end
+        else
+            -- Single-row: label + abbreviated description inline
+            local lbl = ">> " .. s[2]
+            local desc = "  " .. s[3]
+            local space = W - 2 - #lbl
+            mon.write(lbl)
+            if space > 6 then
+                mon.setTextColor(colors.lightGray)
+                mon.write(desc:sub(1, space))
+            end
+        end
     end
-
-    local svcEnd = svcStart + #svcs * 2  -- row after last service
-
-    div(svcEnd, "=", colors.gray)
-
-    -- ── Pricing (2 rows below divider) ──
-    local pRow = svcEnd + 1
-    fillRow(pRow,     colors.gray, colors.yellow, "  First-time setup: 5 Spurs  ")
-    fillRow(pRow + 1, colors.gray, colors.white,  "Contact  cypu  or  ooranges  to get started")
-    div(pRow + 2, "-", colors.gray)
-
-    -- ── Tutorial CTA button ──
-    local btnRow = pRow + 3
-    if btnRow <= H - 1 then
-        fillRow(btnRow, colors.blue)
-        cw(btnRow, "[ Click Here  --  Controls & Setup Guide ]", colors.white, colors.blue)
-        regBtn(1, W, btnRow, function()
-            page = "tutorial"
-            tutPage = 1
-        end)
-    end
-
-    -- ── Footer ──
-    fillRow(H, colors.black, colors.gray, "Cloud Solutions  --  Always Online")
 end
 
 -- ═════════════════════════════════════════════════════════════════════════════
