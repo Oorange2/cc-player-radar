@@ -1,4 +1,4 @@
-﻿-- Cloud Server v3
+-- Cloud Server v3
 local PROTOCOL   = "cloud_ui"
 local SAVE_FILE  = "cloud_accounts.dat"
 local BANK_FILE  = "bank_data.dat"
