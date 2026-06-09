@@ -289,6 +289,12 @@ local function totalLoans()
     return t
 end
 
+local function calcMarketTax(price)
+    if price < 5 then return 0
+    elseif price <= 20 then return 1
+    else return math.floor(price * 0.05) end
+end
+
 -- ── Marketplace data ─────────────────────────────────────────────────────────
 local marketData = {}
 local function saveMarket()
@@ -592,6 +598,29 @@ local function handle(cid, msg)
         rednet.send(cid, {ok=true, log=out}, PROTOCOL)
 
     -- ── Market handlers ───────────────────────────────────────────────────────
+    elseif msg.type == "market_create_listing" then
+        local lot_size = math.max(1, math.floor(tonumber(msg.lot_size) or 1))
+        local price    = math.max(0, math.floor(tonumber(msg.price)    or 0))
+        if not msg.item_name then rednet.send(cid,{ok=false,err="No item specified"},PROTOCOL) return end
+        -- Merge with identical existing listing
+        for _, l in pairs(marketData.listings) do
+            if l.seller==uname and l.item_name==msg.item_name
+               and l.lot_size==lot_size and l.price==price then
+                rednet.send(cid,{ok=true,id=l.id,merged=true,stock=l.stock},PROTOCOL) return
+            end
+        end
+        local nid = marketData.next_id
+        marketData.next_id = nid + 1
+        marketData.listings[tostring(nid)] = {
+            id=nid, seller=uname,
+            item_name=msg.item_name, display_name=msg.display_name or msg.item_name,
+            lot_size=lot_size, price=price, stock=0,
+            listed_ts=os.epoch("utc"),
+        }
+        saveMarket()
+        rednet.send(cid,{ok=true,id=nid,merged=false,stock=0},PROTOCOL)
+        print(uname.." created listing for "..msg.item_name)
+
     elseif msg.type == "market_list" then
         local active = {}
         for _, l in pairs(marketData.listings) do
@@ -692,48 +721,53 @@ local function handle(cid, msg)
         rednet.send(cid,{ok=true,added=actual,stock=l.stock},PROTOCOL)
 
     elseif msg.type == "market_buy" then
-        local acc = accounts[uname]
-        local l   = marketData.listings[tostring(msg.listing_id)]
+        local acc      = accounts[uname]
+        local l        = marketData.listings[tostring(msg.listing_id)]
         if not l             then rednet.send(cid,{ok=false,err="Listing not found"},PROTOCOL) return end
         if l.stock <= 0      then rednet.send(cid,{ok=false,err="Out of stock"},PROTOCOL) return end
         if l.seller == uname then rednet.send(cid,{ok=false,err="Cannot buy your own listing"},PROTOCOL) return end
+        local qty = math.max(1, math.min(math.floor(tonumber(msg.quantity) or 1), l.stock))
         applyDepInterest(uname) applyLoanInterest(uname)
         local b = getBankAcc(uname)
-        if b.balance < l.price then
-            rednet.send(cid,{ok=false,err="Need "..l.price.." sp, have "..b.balance.." sp"},PROTOCOL) return
+        local totalPrice = l.price * qty
+        local totalItems = l.lot_size * qty
+        if b.balance < totalPrice then
+            rednet.send(cid,{ok=false,err="Need "..totalPrice.." sp, have "..b.balance.." sp"},PROTOCOL) return
         end
-        -- Move item: market vault → buyer vault
-        local moved = moveItem(MARKET_VAULT, acc.vault, l.item_name, l.lot_size)
-        if moved < l.lot_size then
+        -- Move items: market vault → buyer vault
+        local moved = moveItem(MARKET_VAULT, acc.vault, l.item_name, totalItems)
+        if moved < totalItems then
             if moved>0 then moveItem(acc.vault,MARKET_VAULT,l.item_name,moved) end
             rednet.send(cid,{ok=false,err="Item transfer failed, try again"},PROTOCOL) return
         end
-        -- Give to buyer inventory directly
+        -- Push to player inventory directly
         local inVault = true
         if acc.invmanager and peripheral.isPresent(acc.invmanager) then
             local ok3,given = pcall(function()
                 return peripheral.call(acc.invmanager,"addItemToPlayer",
-                    acc.vaultDir or "back",{name=l.item_name,count=l.lot_size})
+                    acc.vaultDir or "back",{name=l.item_name,count=totalItems})
             end)
             if ok3 and given and given>0 then inVault=false end
         end
-        -- Payment: 5% tax, 95% to seller
-        local tax        = math.max(1, math.floor(l.price * 0.05))
-        local sellerGets = l.price - tax
-        b.balance = b.balance - l.price
-        addBankLog(uname, "Market buy: "..l.lot_size.."x "..(l.display_name or l.item_name).." "..l.price.." sp")
+        -- Payment with tiered tax
+        local taxPerLot  = calcMarketTax(l.price)
+        local tax        = taxPerLot * qty
+        local sellerGets = totalPrice - tax
+        b.balance = b.balance - totalPrice
+        local dn = l.display_name or l.item_name
+        addBankLog(uname, "Bought "..totalItems.."x "..dn.." -"..totalPrice.."sp")
         local sb = getBankAcc(l.seller)
         sb.balance = sb.balance + sellerGets
-        addBankLog(l.seller,"Market sale: "..l.lot_size.."x "..(l.display_name or l.item_name).." +"..sellerGets.." sp (tax -"..tax..")")
+        addBankLog(l.seller,"Sold "..totalItems.."x "..dn.." +"..sellerGets.."sp")
         bankData.market_revenue = (bankData.market_revenue or 0) + tax
-        l.stock = l.stock - 1
+        l.stock = l.stock - qty
         saveMarket() saveBank()
         rednet.send(cid,{
-            ok=true, item=l.display_name or l.item_name, count=l.lot_size,
-            price=l.price, tax=tax, seller_got=sellerGets,
+            ok=true, item=dn, count=totalItems,
+            price=totalPrice, tax=tax, seller_got=sellerGets,
             new_balance=b.balance, inVault=inVault,
         },PROTOCOL)
-        print(uname.." bought "..l.lot_size.."x "..l.item_name.." from "..l.seller.." for "..l.price.." sp")
+        print(uname.." bought "..totalItems.."x "..l.item_name.." from "..l.seller.." for "..totalPrice.." sp")
 
     elseif msg.type == "market_cancel" then
         local acc = accounts[uname]
