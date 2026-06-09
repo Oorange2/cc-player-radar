@@ -471,6 +471,15 @@ local function coinPickerUI(cfg)
         return t
     end
 
+    -- Effective max for a coin: capped by both bank stock and remaining target budget
+    local function effMax(c)
+        if cfg.target then
+            local otherSp = totalSp() - (counts[c.name] or 0) * c.value
+            return math.min(c.available, math.floor(math.max(0, cfg.target - otherSp) / c.value))
+        end
+        return c.available
+    end
+
     while true do
         W, H = term.getSize()
         term.setBackgroundColor(colors.black) term.clear()
@@ -480,6 +489,11 @@ local function coinPickerUI(cfg)
         local hdr = " "..cfg.title
         if #hdr > W-3 then hdr = hdr:sub(1,W-3) end
         term.write(hdr..string.rep(" ",math.max(0,W-#hdr-3)).."[X]")
+        -- Auto-clamp counts to effective max (fixes counts made invalid by other row changes)
+        for _, c in ipairs(cfg.coins) do
+            local em = effMax(c)
+            if (counts[c.name] or 0) > em then counts[c.name] = em end
+        end
         -- Total line
         term.setBackgroundColor(colors.black)
         term.setCursorPos(1,2) term.clearLine()
@@ -490,9 +504,9 @@ local function coinPickerUI(cfg)
             if diff == 0 then
                 term.setTextColor(colors.lime) term.write("OK!")
             elseif diff > 0 then
-                term.setTextColor(colors.orange) term.write("need "..diff.." more")
+                term.setTextColor(colors.orange) term.write("need "..diff.."sp")
             else
-                term.setTextColor(colors.red) term.write("over by "..(-diff).."!")
+                term.setTextColor(colors.red) term.write("over "..(-diff).."sp!")
             end
         else
             term.setTextColor(colors.gray) term.write(" Total: ")
@@ -503,14 +517,19 @@ local function coinPickerUI(cfg)
             local y = LIST_TOP + i - 1
             if y >= H-1 then break end
             term.setCursorPos(1,y) term.setBackgroundColor(colors.black) term.clearLine()
-            local cnt = counts[c.name] or 0
-            local rightStr = "x"..cnt.."/"..c.available
+            local cnt  = counts[c.name] or 0
+            local em   = effMax(c)
+            -- right side: "cnt/em" — uses effective max so it always reflects reality
+            local rightStr = tostring(cnt).."/"..tostring(em)
             local leftStr  = c.label.." "..c.value.."sp"
-            local gap = math.max(1, W - 2 - #leftStr - #rightStr)
+            -- fit left text into available width, always leave room for right side
+            local leftW = math.max(4, W - 2 - #rightStr - 1)
+            local gap   = math.max(1, W - 2 - math.min(#leftStr, leftW) - #rightStr)
             term.setTextColor(itemColor(c.name)) term.write("■ ")
-            term.setTextColor(colors.white) term.write(leftStr:sub(1, W-2-#rightStr-1))
+            term.setTextColor(cnt > 0 and colors.white or colors.gray)
+            term.write(leftStr:sub(1, leftW))
             term.setTextColor(colors.gray) term.write(string.rep(" ", gap))
-            term.setTextColor(colors.yellow) term.write(rightStr)
+            term.setTextColor(cnt > 0 and colors.yellow or colors.gray) term.write(rightStr)
         end
         -- Hint
         local hintY = LIST_TOP + #cfg.coins
@@ -546,14 +565,7 @@ local function coinPickerUI(cfg)
             local row = my - LIST_TOP + 1
             if row>=1 and row<=#cfg.coins then
                 local c = cfg.coins[row]
-                local cur = counts[c.name] or 0
-                local newVal = math.max(0, math.min(c.available, cur - dir))
-                if cfg.target then
-                    local otherSp = totalSp() - cur * c.value
-                    local maxHere = math.floor(math.max(0, cfg.target - otherSp) / c.value)
-                    newVal = math.min(newVal, maxHere)
-                end
-                counts[c.name] = newVal
+                counts[c.name] = math.max(0, math.min(effMax(c), (counts[c.name] or 0) - dir))
             end
         elseif ev=="key" then
             if p1==keys.q then return nil
