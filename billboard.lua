@@ -287,13 +287,33 @@ local function draw()
     end
 end
 
--- Initial draw
+-- Auto-reset: return to main page after 60 seconds of no interaction
+local TIMEOUT  = 60
+local timerId  = nil
+
+local function resetTimer()
+    if timerId then os.cancelTimer(timerId) end
+    timerId = os.startTimer(TIMEOUT)
+end
+
+-- Initial draw + start timer
 draw()
+resetTimer()
 
 -- Event loop
 while true do
-    local ev, side, mx, my = os.pullEvent("monitor_touch")
+    local ev, p1, p2, p3 = os.pullEvent()
     W, H = mon.getSize()
-    handleClick(mx, my)
-    draw()
+    if ev == "monitor_touch" then
+        -- p1=side, p2=x, p3=y
+        handleClick(p2, p3)
+        resetTimer()
+        draw()
+    elseif ev == "timer" and p1 == timerId then
+        if page ~= "main" then
+            page = "main"
+            draw()
+        end
+        resetTimer()  -- keep the timer ticking on main page too
+    end
 end
