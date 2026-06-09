@@ -122,6 +122,7 @@ local function drawMain()
         { colors.orange,    "LOANS",               "Borrow spurs, repay in 5 irl days"      },
         { colors.magenta,   "CREDIT SCORE",        "Good history = lower loan rates"         },
         { colors.lightBlue, "ACTIVITY LOG",        "Every transaction on record"             },
+        { colors.green,     "EARN SPURS",          "Do /missions in-game to earn coins!"     },
     }
 
     local svcTop = 4
