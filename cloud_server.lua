@@ -1,9 +1,17 @@
--- Cloud Server v3
+﻿-- Cloud Server v3
 local PROTOCOL   = "cloud_ui"
 local SAVE_FILE  = "cloud_accounts.dat"
 local BANK_FILE  = "bank_data.dat"
 local BANK_VAULT = "create:item_vault_30"
 local SPUR_ID      = "numismatics:spur"
+local DENOMS = {
+    {name="numismatics:sun",      label="Sun",      value=4096},
+    {name="numismatics:crown",    label="Crown",    value=512},
+    {name="numismatics:cog",      label="Cog",      value=64},
+    {name="numismatics:sprocket", label="Sprocket", value=16},
+    {name="numismatics:bevel",    label="Bevel",    value=8},
+    {name="numismatics:spur",     label="Spur",     value=1},
+}
 local MARKET_VAULT = "create:item_vault_37"
 local MARKET_FILE  = "market_data.dat"
 
@@ -205,6 +213,19 @@ local function countSpurs(vaultName)
     local total = 0
     for _, item in pairs(items) do
         if item.name == SPUR_ID then total = total + item.count end
+    end
+    return total
+end
+
+local function countVaultValue(vaultName)
+    if not peripheral.isPresent(vaultName) then return 0 end
+    local ok, items = pcall(function() return peripheral.call(vaultName, "list") end)
+    if not ok or type(items) ~= "table" then return 0 end
+    local denomVal = {}
+    for _, d in ipairs(DENOMS) do denomVal[d.name] = d.value end
+    local total = 0
+    for _, item in pairs(items) do
+        total = total + item.count * (denomVal[item.name] or 0)
     end
     return total
 end
@@ -418,86 +439,133 @@ local function handle(cid, msg)
                 overdue   = now > b.loan.due_ts,
             }
         end
+        local vaultVal = countVaultValue(BANK_VAULT)
+        local ok_bd, blist = pcall(function() return peripheral.call(BANK_VAULT,"list") end)
+        local bdCounts = {}
+        if ok_bd and type(blist)=="table" then
+            for _, item in pairs(blist) do
+                bdCounts[item.name] = (bdCounts[item.name] or 0) + item.count
+            end
+        end
+        local bankDenoms = {}
+        for _, d in ipairs(DENOMS) do bankDenoms[d.name] = bdCounts[d.name] or 0 end
         rednet.send(cid, {
             ok         = true,
             balance    = b.balance,
             credit     = b.credit,
             loan       = loan,
             loanRate   = getLoanRate(b.credit),
-            loanCap    = math.max(0, math.floor(countSpurs(BANK_VAULT)*0.4) - totalLoans()),
-            bankSpurs  = countSpurs(BANK_VAULT),
+            loanCap    = math.max(0, math.floor(vaultVal*0.4) - totalLoans()),
+            bankSpurs  = vaultVal,
+            bankDenoms = bankDenoms,
         }, PROTOCOL)
 
     elseif msg.type == "bank_deposit" then
         local acc    = accounts[uname]
         local b      = getBankAcc(uname)
-        local amount = tonumber(msg.amount) or 0
-        if amount <= 0 then rednet.send(cid, {ok=false, err="Invalid amount"}, PROTOCOL) return end
-        local moved = 0
-        if msg.source == "inventory" then
+        local coins  = msg.coins or {}
+        local source = msg.source or "vault"
+        if not acc.vault or not peripheral.isPresent(acc.vault) then
+            rednet.send(cid,{ok=false,err="No vault configured"},PROTOCOL) return
+        end
+        -- If inventory, pull each coin type into player vault first
+        if source == "inventory" then
             if not acc.invmanager or not peripheral.isPresent(acc.invmanager) then
-                rednet.send(cid, {ok=false, err="No inventory manager"}, PROTOCOL) return
+                rednet.send(cid,{ok=false,err="No inventory manager"},PROTOCOL) return
             end
-            local ok2, n = pcall(function()
-                return peripheral.call(acc.invmanager, "removeItemFromPlayer",
-                    acc.vaultDir or "back", {name=SPUR_ID, count=amount})
-            end)
-            if not ok2 or not n or n == 0 then
-                rednet.send(cid, {ok=false, err="No spurs in inventory"}, PROTOCOL) return
+            for _, d in ipairs(DENOMS) do
+                local cnt = math.max(0, math.floor(tonumber(coins[d.name]) or 0))
+                if cnt > 0 then
+                    local ok2, n = pcall(function()
+                        return peripheral.call(acc.invmanager,"removeItemFromPlayer",
+                            acc.vaultDir or "back",{name=d.name,count=cnt})
+                    end)
+                    coins[d.name] = (ok2 and n and n>0) and n or 0
+                end
             end
-            moved = moveSpurs(acc.vault, BANK_VAULT, n)
-            if moved == 0 then
-                -- spurs stuck in user vault - return a partial error
-                rednet.send(cid, {ok=false, err="Moved to your vault but bank transfer failed - deposit from vault"}, PROTOCOL) return
+        end
+        -- Move from player vault to bank vault, tallying spur value
+        local total_sp = 0
+        for _, d in ipairs(DENOMS) do
+            local cnt = math.max(0, math.floor(tonumber(coins[d.name]) or 0))
+            if cnt > 0 then
+                local actual = moveItem(acc.vault, BANK_VAULT, d.name, cnt)
+                total_sp = total_sp + actual * d.value
             end
-        else -- "vault"
-            if not acc.vault or not peripheral.isPresent(acc.vault) then
-                rednet.send(cid, {ok=false, err="No vault"}, PROTOCOL) return
-            end
-            moved = moveSpurs(acc.vault, BANK_VAULT, amount)
-            if moved == 0 then rednet.send(cid, {ok=false, err="No spurs in vault"}, PROTOCOL) return end
+        end
+        if total_sp == 0 then
+            rednet.send(cid,{ok=false,err="No coins deposited"},PROTOCOL) return
         end
         applyDepInterest(uname)
-        b.balance = b.balance + moved
-        addBankLog(uname, "Deposited " .. moved .. " sp")
+        b.balance = b.balance + total_sp
+        addBankLog(uname,"Deposited "..total_sp.." sp")
         saveBank()
-        rednet.send(cid, {ok=true, moved=moved, balance=b.balance}, PROTOCOL)
-        print(uname .. " bank deposit: " .. moved .. " sp")
+        rednet.send(cid,{ok=true,moved=total_sp,balance=b.balance},PROTOCOL)
+        print(uname.." bank deposit: "..total_sp.." sp")
 
     elseif msg.type == "bank_withdraw" then
-        local acc    = accounts[uname]
-        local b      = getBankAcc(uname)
+        local acc   = accounts[uname]
+        local b     = getBankAcc(uname)
         applyDepInterest(uname)
-        local amount = tonumber(msg.amount) or 0
-        if amount <= 0 then rednet.send(cid, {ok=false, err="Invalid amount"}, PROTOCOL) return end
-        if amount > b.balance then
-            rednet.send(cid, {ok=false, err="Only "..b.balance.." sp in account"}, PROTOCOL) return
+        local coins = msg.coins or {}
+        -- Calculate total sp from requested coin breakdown
+        local total_sp = 0
+        for _, d in ipairs(DENOMS) do
+            local cnt = math.max(0, math.floor(tonumber(coins[d.name]) or 0))
+            total_sp = total_sp + cnt * d.value
+        end
+        if total_sp <= 0 then
+            rednet.send(cid,{ok=false,err="No amount specified"},PROTOCOL) return
+        end
+        if total_sp > b.balance then
+            rednet.send(cid,{ok=false,err="Only "..b.balance.." sp in account"},PROTOCOL) return
         end
         if not acc.vault or not peripheral.isPresent(acc.vault) then
-            rednet.send(cid, {ok=false, err="No vault configured"}, PROTOCOL) return
+            rednet.send(cid,{ok=false,err="No vault configured"},PROTOCOL) return
         end
         if not acc.invmanager or not peripheral.isPresent(acc.invmanager) then
-            rednet.send(cid, {ok=false, err="No inventory manager"}, PROTOCOL) return
+            rednet.send(cid,{ok=false,err="No inventory manager"},PROTOCOL) return
         end
-        if countSpurs(BANK_VAULT) < amount then
-            rednet.send(cid, {ok=false, err="Bank vault low on reserves"}, PROTOCOL) return
+        -- Verify bank has each denomination requested
+        local bankItems = {}
+        for _, item in pairs(peripheral.call(BANK_VAULT,"list") or {}) do
+            bankItems[item.name] = (bankItems[item.name] or 0) + item.count
         end
-        local moved = moveSpurs(BANK_VAULT, acc.vault, amount)
-        if moved == 0 then rednet.send(cid, {ok=false, err="Transfer failed"}, PROTOCOL) return end
-        -- Push directly to player inventory; reverse if inventory full
-        local ok3, given = pcall(function()
-            return peripheral.call(acc.invmanager, "addItemToPlayer",
-                acc.vaultDir or "back", {name=SPUR_ID, count=moved})
-        end)
-        if not ok3 or not given or given == 0 then
-            moveSpurs(acc.vault, BANK_VAULT, moved)
-            rednet.send(cid, {ok=false, err="Inventory full! Clear space first"}, PROTOCOL) return
+        for _, d in ipairs(DENOMS) do
+            local cnt = math.max(0, math.floor(tonumber(coins[d.name]) or 0))
+            if cnt > 0 and (bankItems[d.name] or 0) < cnt then
+                rednet.send(cid,{ok=false,err="Bank lacks enough "..d.label.." coins"},PROTOCOL) return
+            end
         end
-        b.balance = b.balance - moved
-        addBankLog(uname, "Withdrew " .. moved .. " sp")
+        -- Step 1: move coins bank vault → player vault
+        local moved = {}
+        for _, d in ipairs(DENOMS) do
+            local cnt = math.max(0, math.floor(tonumber(coins[d.name]) or 0))
+            if cnt > 0 then moved[d.name] = moveItem(BANK_VAULT, acc.vault, d.name, cnt) end
+        end
+        -- Step 2: player vault → player inventory; reverse all on failure
+        for _, d in ipairs(DENOMS) do
+            local cnt = moved[d.name] or 0
+            if cnt > 0 then
+                local ok3, given = pcall(function()
+                    return peripheral.call(acc.invmanager,"addItemToPlayer",
+                        acc.vaultDir or "back",{name=d.name,count=cnt})
+                end)
+                if not ok3 or not given or given == 0 then
+                    for _, d2 in ipairs(DENOMS) do
+                        if (moved[d2.name] or 0) > 0 then
+                            moveItem(acc.vault, BANK_VAULT, d2.name, moved[d2.name])
+                        end
+                    end
+                    rednet.send(cid,{ok=false,err="Inventory full! Clear space first"},PROTOCOL) return
+                end
+            end
+        end
+        b.balance = b.balance - total_sp
+        addBankLog(uname,"Withdrew "..total_sp.." sp")
         saveBank()
-        rednet.send(cid, {ok=true, moved=moved, balance=b.balance}, PROTOCOL)
-        print(uname .. " bank withdraw: " .. moved .. " sp")
+        rednet.send(cid,{ok=true,moved=total_sp,balance=b.balance},PROTOCOL)
+        print(uname.." bank withdraw: "..total_sp.." sp")
 
     elseif msg.type == "bank_get_loan" then
         local acc    = accounts[uname]
@@ -511,7 +579,7 @@ local function handle(cid, msg)
             rednet.send(cid, {ok=false, err="Credit score too low (need 300+)"}, PROTOCOL) return
         end
         local amount = math.max(1, math.min(64, tonumber(msg.amount) or 0))
-        local cap    = math.max(0, math.floor(countSpurs(BANK_VAULT)*0.4) - totalLoans())
+        local cap    = math.max(0, math.floor(countVaultValue(BANK_VAULT)*0.4) - totalLoans())
         if amount > cap then
             rednet.send(cid, {ok=false, err="Bank cannot finance this loan right now"}, PROTOCOL) return
         end
@@ -812,7 +880,7 @@ local function handle(cid, msg)
             ok=true, users=summary,
             total_dep   = totalDeposits(),
             total_loans = totalLoans(),
-            vault_spurs = countSpurs(BANK_VAULT),
+            vault_spurs = countVaultValue(BANK_VAULT),
         }, PROTOCOL)
     end
 end
