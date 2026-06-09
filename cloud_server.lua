@@ -3,7 +3,9 @@ local PROTOCOL   = "cloud_ui"
 local SAVE_FILE  = "cloud_accounts.dat"
 local BANK_FILE  = "bank_data.dat"
 local BANK_VAULT = "create:item_vault_30"
-local SPUR_ID    = "numismatics:spur"
+local SPUR_ID      = "numismatics:spur"
+local MARKET_VAULT = "create:item_vault_37"
+local MARKET_FILE  = "market_data.dat"
 
 local modemSide = nil
 for _, s in ipairs({"top","bottom","left","right","front","back"}) do
@@ -224,6 +226,23 @@ local function moveSpurs(fromV, toV, amount)
     return moved
 end
 
+local function moveItem(fromV, toV, itemName, count)
+    if not peripheral.isPresent(fromV) then return 0 end
+    if not peripheral.isPresent(toV)   then return 0 end
+    local ok, items = pcall(function() return peripheral.call(fromV, "list") end)
+    if not ok or type(items) ~= "table" then return 0 end
+    local moved = 0
+    for slot, item in pairs(items) do
+        if item.name == itemName and moved < count then
+            local ok2, n = pcall(function()
+                return peripheral.call(fromV, "pushItems", toV, slot, count - moved)
+            end)
+            if ok2 and n then moved = moved + n end
+        end
+    end
+    return moved
+end
+
 local function applyDepInterest(uname)
     local b = getBankAcc(uname)
     if b.balance <= 0 then return end
@@ -269,6 +288,22 @@ local function totalLoans()
     end
     return t
 end
+
+-- ── Marketplace data ─────────────────────────────────────────────────────────
+local marketData = {}
+local function saveMarket()
+    local f = fs.open(MARKET_FILE,"w") f.write(textutils.serialize(marketData)) f.close()
+end
+local function loadMarket()
+    if fs.exists(MARKET_FILE) then
+        local f = fs.open(MARKET_FILE,"r")
+        marketData = textutils.unserialize(f.readAll()) or {}
+        f.close()
+    end
+    if not marketData.listings then marketData.listings = {} end
+    if not marketData.next_id  then marketData.next_id  = 1  end
+end
+loadMarket()
 
 -- ── Message handler ──────────────────────────────────────────────────────────
 local function handle(cid, msg)
@@ -443,7 +478,16 @@ local function handle(cid, msg)
         b.balance = b.balance - moved
         addBankLog(uname, "Withdrew " .. moved .. " sp")
         saveBank()
-        rednet.send(cid, {ok=true, moved=moved, balance=b.balance}, PROTOCOL)
+        -- Try to push directly to player's inventory
+        local inVault = true
+        if acc.invmanager and peripheral.isPresent(acc.invmanager) then
+            local ok3, given = pcall(function()
+                return peripheral.call(acc.invmanager, "addItemToPlayer",
+                    acc.vaultDir or "back", {name=SPUR_ID, count=moved})
+            end)
+            if ok3 and given and given > 0 then inVault = false end
+        end
+        rednet.send(cid, {ok=true, moved=moved, balance=b.balance, inVault=inVault}, PROTOCOL)
         print(uname .. " bank withdraw: " .. moved .. " sp")
 
     elseif msg.type == "bank_get_loan" then
@@ -546,6 +590,173 @@ local function handle(cid, msg)
         local out = {}
         for i = #b.blog, 1, -1 do table.insert(out, b.blog[i]) end
         rednet.send(cid, {ok=true, log=out}, PROTOCOL)
+
+    -- ── Market handlers ───────────────────────────────────────────────────────
+    elseif msg.type == "market_list" then
+        local active = {}
+        for _, l in pairs(marketData.listings) do
+            table.insert(active, {
+                id=l.id, seller=l.seller,
+                item_name=l.item_name, display_name=l.display_name,
+                lot_size=l.lot_size, price=l.price, stock=l.stock,
+                listed_ts=l.listed_ts,
+            })
+        end
+        table.sort(active, function(a,b) return (a.listed_ts or 0) > (b.listed_ts or 0) end)
+        rednet.send(cid, {ok=true, listings=active}, PROTOCOL)
+
+    elseif msg.type == "market_sell" then
+        local acc    = accounts[uname]
+        local lot_size = math.max(1, math.floor(tonumber(msg.lot_size) or 1))
+        local price    = math.max(0, math.floor(tonumber(msg.price)    or 0))
+        local lots     = math.max(1, math.floor(tonumber(msg.lots)     or 1))
+        local total    = lot_size * lots
+        local moved    = 0
+        if msg.source == "inventory" then
+            if not acc or not acc.invmanager or not peripheral.isPresent(acc.invmanager) then
+                rednet.send(cid,{ok=false,err="No inventory manager"},PROTOCOL) return
+            end
+            local ok2,n = pcall(function()
+                return peripheral.call(acc.invmanager,"removeItemFromPlayer",
+                    acc.vaultDir or "back",{name=msg.item_name,count=total})
+            end)
+            if not ok2 or not n or n==0 then rednet.send(cid,{ok=false,err="Item not in inventory"},PROTOCOL) return end
+            moved = moveItem(acc.vault, MARKET_VAULT, msg.item_name, n)
+            if moved < lot_size then
+                if moved>0 then moveItem(MARKET_VAULT,acc.vault,msg.item_name,moved) end
+                rednet.send(cid,{ok=false,err="Market vault transfer failed"},PROTOCOL) return
+            end
+        else
+            if not acc or not acc.vault or not peripheral.isPresent(acc.vault) then
+                rednet.send(cid,{ok=false,err="No vault"},PROTOCOL) return
+            end
+            moved = moveItem(acc.vault, MARKET_VAULT, msg.item_name, total)
+            if moved < lot_size then
+                if moved>0 then moveItem(MARKET_VAULT,acc.vault,msg.item_name,moved) end
+                rednet.send(cid,{ok=false,err="Not enough items in vault"},PROTOCOL) return
+            end
+        end
+        local actual_lots = math.floor(moved / lot_size)
+        local remainder   = moved - actual_lots * lot_size
+        if remainder > 0 then moveItem(MARKET_VAULT, acc.vault, msg.item_name, remainder) end
+        -- Merge with existing matching listing
+        local merged_id = nil
+        for key, l in pairs(marketData.listings) do
+            if l.seller==uname and l.item_name==msg.item_name
+               and l.lot_size==lot_size and l.price==price then
+                l.stock = l.stock + actual_lots
+                merged_id = l.id
+                saveMarket()
+                rednet.send(cid,{ok=true,id=l.id,lots=actual_lots,stock=l.stock,merged=true},PROTOCOL) return
+            end
+        end
+        local nid = marketData.next_id
+        marketData.next_id = nid + 1
+        marketData.listings[tostring(nid)] = {
+            id=nid, seller=uname,
+            item_name=msg.item_name, display_name=msg.display_name or msg.item_name,
+            lot_size=lot_size, price=price, stock=actual_lots,
+            listed_ts=os.epoch("utc"),
+        }
+        saveMarket()
+        rednet.send(cid,{ok=true,id=nid,lots=actual_lots,stock=actual_lots,merged=false},PROTOCOL)
+        print(uname.." listed "..actual_lots.." lot(s) of "..msg.item_name)
+
+    elseif msg.type == "market_add_stock" then
+        local acc = accounts[uname]
+        local l   = marketData.listings[tostring(msg.listing_id)]
+        if not l then rednet.send(cid,{ok=false,err="Listing not found"},PROTOCOL) return end
+        if l.seller ~= uname then rednet.send(cid,{ok=false,err="Not your listing"},PROTOCOL) return end
+        local lots  = math.max(1, math.floor(tonumber(msg.lots) or 1))
+        local total = lots * l.lot_size
+        local moved = 0
+        if msg.source == "inventory" then
+            if not acc.invmanager or not peripheral.isPresent(acc.invmanager) then
+                rednet.send(cid,{ok=false,err="No inventory manager"},PROTOCOL) return
+            end
+            local ok2,n = pcall(function()
+                return peripheral.call(acc.invmanager,"removeItemFromPlayer",
+                    acc.vaultDir or "back",{name=l.item_name,count=total})
+            end)
+            if not ok2 or not n or n==0 then rednet.send(cid,{ok=false,err="Item not in inventory"},PROTOCOL) return end
+            moved = moveItem(acc.vault, MARKET_VAULT, l.item_name, n)
+        else
+            moved = moveItem(acc.vault, MARKET_VAULT, l.item_name, total)
+        end
+        local actual = math.floor(moved / l.lot_size)
+        local rem    = moved - actual * l.lot_size
+        if rem > 0 then moveItem(MARKET_VAULT, acc.vault, l.item_name, rem) end
+        if actual == 0 then rednet.send(cid,{ok=false,err="No items transferred"},PROTOCOL) return end
+        l.stock = l.stock + actual
+        saveMarket()
+        rednet.send(cid,{ok=true,added=actual,stock=l.stock},PROTOCOL)
+
+    elseif msg.type == "market_buy" then
+        local acc = accounts[uname]
+        local l   = marketData.listings[tostring(msg.listing_id)]
+        if not l             then rednet.send(cid,{ok=false,err="Listing not found"},PROTOCOL) return end
+        if l.stock <= 0      then rednet.send(cid,{ok=false,err="Out of stock"},PROTOCOL) return end
+        if l.seller == uname then rednet.send(cid,{ok=false,err="Cannot buy your own listing"},PROTOCOL) return end
+        applyDepInterest(uname) applyLoanInterest(uname)
+        local b = getBankAcc(uname)
+        if b.balance < l.price then
+            rednet.send(cid,{ok=false,err="Need "..l.price.." sp, have "..b.balance.." sp"},PROTOCOL) return
+        end
+        -- Move item: market vault → buyer vault
+        local moved = moveItem(MARKET_VAULT, acc.vault, l.item_name, l.lot_size)
+        if moved < l.lot_size then
+            if moved>0 then moveItem(acc.vault,MARKET_VAULT,l.item_name,moved) end
+            rednet.send(cid,{ok=false,err="Item transfer failed, try again"},PROTOCOL) return
+        end
+        -- Give to buyer inventory directly
+        local inVault = true
+        if acc.invmanager and peripheral.isPresent(acc.invmanager) then
+            local ok3,given = pcall(function()
+                return peripheral.call(acc.invmanager,"addItemToPlayer",
+                    acc.vaultDir or "back",{name=l.item_name,count=l.lot_size})
+            end)
+            if ok3 and given and given>0 then inVault=false end
+        end
+        -- Payment: 5% tax, 95% to seller
+        local tax        = math.max(1, math.floor(l.price * 0.05))
+        local sellerGets = l.price - tax
+        b.balance = b.balance - l.price
+        addBankLog(uname, "Market buy: "..l.lot_size.."x "..(l.display_name or l.item_name).." "..l.price.." sp")
+        local sb = getBankAcc(l.seller)
+        sb.balance = sb.balance + sellerGets
+        addBankLog(l.seller,"Market sale: "..l.lot_size.."x "..(l.display_name or l.item_name).." +"..sellerGets.." sp (tax -"..tax..")")
+        bankData.market_revenue = (bankData.market_revenue or 0) + tax
+        l.stock = l.stock - 1
+        saveMarket() saveBank()
+        rednet.send(cid,{
+            ok=true, item=l.display_name or l.item_name, count=l.lot_size,
+            price=l.price, tax=tax, seller_got=sellerGets,
+            new_balance=b.balance, inVault=inVault,
+        },PROTOCOL)
+        print(uname.." bought "..l.lot_size.."x "..l.item_name.." from "..l.seller.." for "..l.price.." sp")
+
+    elseif msg.type == "market_cancel" then
+        local acc = accounts[uname]
+        local l   = marketData.listings[tostring(msg.listing_id)]
+        if not l then rednet.send(cid,{ok=false,err="Listing not found"},PROTOCOL) return end
+        if l.seller~=uname and not sess.isAdmin then
+            rednet.send(cid,{ok=false,err="Not your listing"},PROTOCOL) return
+        end
+        local returned = 0
+        if l.stock > 0 and acc and acc.vault then
+            returned = moveItem(MARKET_VAULT, acc.vault, l.item_name, l.stock * l.lot_size)
+        end
+        marketData.listings[tostring(msg.listing_id)] = nil
+        saveMarket()
+        rednet.send(cid,{ok=true,returned=returned},PROTOCOL)
+
+    elseif msg.type == "market_my_listings" then
+        local mine = {}
+        for _, l in pairs(marketData.listings) do
+            if l.seller == uname then table.insert(mine, l) end
+        end
+        table.sort(mine, function(a,b) return (a.listed_ts or 0) > (b.listed_ts or 0) end)
+        rednet.send(cid,{ok=true,listings=mine},PROTOCOL)
 
     elseif msg.type == "admin_bank_overview" then
         if not sess.isAdmin then rednet.send(cid, {err="Not authorized"}, PROTOCOL) return end
