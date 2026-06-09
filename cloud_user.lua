@@ -9,6 +9,7 @@ if not modemSide then error("No wireless modem found") end
 rednet.open(modemSide)
 
 local W, H     = term.getSize()
+pcall(term.setPaletteColor, colors.orange, 0xCC6600)
 local serverId = nil
 local token    = nil
 local username = nil
@@ -967,8 +968,9 @@ local function marketBrowse()
             -- Buttons
             term.setCursorPos(1,H-1) term.setBackgroundColor(colors.black) term.clearLine()
             if l.stock>0 then
-                local buyBg = canBuy and colors.green or colors.gray
-                term.setBackgroundColor(buyBg) term.setTextColor(colors.white) term.write(buyLabel)
+                local buyBg = canBuy and colors.white or colors.gray
+                local buyFg = canBuy and colors.black or colors.lightGray
+                term.setBackgroundColor(buyBg) term.setTextColor(buyFg) term.write(buyLabel)
                 local gap=math.max(1,W-#buyLabel-#cancelLabel)
                 term.setBackgroundColor(colors.black) term.write(string.rep(" ",gap))
             end
@@ -1137,7 +1139,7 @@ local function marketAddListing()
     elseif tax==1 then term.write("Flat 1 sp fee/sale (5-20 sp)")
     else term.write("Fee: "..tax.." sp/sale (5%)") end
     term.setCursorPos(1,H-1) term.setBackgroundColor(colors.black) term.clearLine()
-    term.setBackgroundColor(colors.green) term.setTextColor(colors.white) term.write(" Create ")
+    term.setBackgroundColor(colors.white) term.setTextColor(colors.black) term.write(" Create ")
     term.setBackgroundColor(colors.black) term.write("  ")
     term.setBackgroundColor(colors.red) term.write(" Cancel ")
     term.setCursorPos(1,H) term.setBackgroundColor(colors.black) term.write(string.rep(" ",W))
