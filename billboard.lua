@@ -105,7 +105,7 @@ local function drawMain()
     cw(H-1, "[ Click Here  --  Controls & Setup Guide ]", colors.white, colors.blue)
     regBtn(1, W, H-1, function() page="tutorial" tutPage=1 end)
     div(H-2, "-", colors.gray)
-    fillRow(H-3, colors.gray, colors.white,  "Contact  cypu  or  ooranges  to join")
+    fillRow(H-3, colors.gray, colors.white,  "cypu  /  ooranges  /  Lux_silver")
     fillRow(H-4, colors.gray, colors.yellow, "First-time setup: only 6 Spurs!")
     div(H-5, "=", colors.gray)
 
@@ -185,6 +185,7 @@ local tutContent = {
         lw(15, "Admins to contact:", colors.yellow)
         lw(16, "  cypu", colors.lime)
         lw(17, "  ooranges", colors.lime)
+        lw(18, "  Lux_silver", colors.lime)
     end,
 
     -- ── Page 2: Controls ─────────────────────────────────────────────────────
