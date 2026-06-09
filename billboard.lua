@@ -252,7 +252,7 @@ local tutContent = {
         lw(4,  "  Open the Market tab on your pocket PC.", colors.white)
         lw(5,  "  Browse listings and tap to see details.", colors.white)
         lw(6,  "  Payment is taken from your bank balance.", colors.white)
-        lw(7,  "  Items are delivered straight to your vault.", colors.lime)
+        lw(7,  "  Items are delivered straight to your inventory.", colors.lime)
 
         div(8, "-", colors.gray)
         lw(9,  "SELLING ITEMS", colors.yellow)
