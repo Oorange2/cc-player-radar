@@ -51,7 +51,7 @@ local function doLogin()
             term.setCursorPos(1,6) term.setTextColor(colors.red)
             term.write((res and res.err) or "Server not found")
             term.setCursorPos(1,7) term.setTextColor(colors.gray) term.write("Press any key...")
-            os.pullEvent("key")
+            os.pullEvent()
         end
     end
 end
@@ -514,7 +514,7 @@ local function bankDeposit(info)
         term.setCursorPos(1,3) term.setTextColor(colors.red)
         term.write("No spurs in "..(src==1 and "inventory" or "vault"))
         term.setCursorPos(1,5) term.setTextColor(colors.gray) term.write("Press any key...")
-        os.pullEvent("key") return
+        os.pullEvent() return
     end
     local amt = amountPicker({
         title  = "Deposit to Bank",
@@ -532,7 +532,7 @@ local function bankDeposit(info)
         term.setTextColor(colors.red) term.write((res and res.err) or "Failed")
     end
     term.setCursorPos(1,6) term.setTextColor(colors.gray) term.write("Press any key...")
-    os.pullEvent("key")
+    os.pullEvent()
 end
 
 local function bankWithdraw(info)
@@ -540,7 +540,7 @@ local function bankWithdraw(info)
         term.setBackgroundColor(colors.black) term.clear()
         term.setCursorPos(1,3) term.setTextColor(colors.red) term.write("No balance to withdraw")
         term.setCursorPos(1,5) term.setTextColor(colors.gray) term.write("Press any key...")
-        os.pullEvent("key") return
+        os.pullEvent() return
     end
     local amt = amountPicker({title="Withdraw from Bank", available=info.balance, hint="Coins sent directly to your inventory"})
     if not amt then return end
@@ -555,7 +555,7 @@ local function bankWithdraw(info)
         term.setTextColor(colors.red) term.write((res and res.err) or "Failed")
     end
     term.setCursorPos(1,7) term.setTextColor(colors.gray) term.write("Press any key...")
-    os.pullEvent("key")
+    os.pullEvent()
 end
 
 local function bankLoans(info)
@@ -643,7 +643,7 @@ local function bankLoans(info)
                                 term.setTextColor(colors.red) term.write((res and res.err) or "Failed")
                             end
                             term.setCursorPos(1,6) term.setTextColor(colors.gray) term.write("Press any key...")
-                            os.pullEvent("key")
+                            os.pullEvent()
                             return
                         end
                     end
@@ -707,7 +707,7 @@ local function bankLoans(info)
                                 term.setTextColor(colors.red) term.write((res and res.err) or "Failed")
                             end
                             term.setCursorPos(1,8) term.setTextColor(colors.gray) term.write("Press any key...")
-                            os.pullEvent("key")
+                            os.pullEvent()
                             return
                         end
                     end
@@ -731,7 +731,7 @@ local function bankMenu()
             term.setCursorPos(1,3) term.setTextColor(colors.red)
             term.write((info and info.err) or "Bank server error")
             term.setCursorPos(1,5) term.setTextColor(colors.gray) term.write("Press any key...")
-            os.pullEvent("key") return
+            os.pullEvent() return
         end
         W,H=term.getSize()
         term.setBackgroundColor(colors.black) term.clear()
@@ -839,7 +839,7 @@ local function pickItem(source)
         term.setCursorPos(2,3) term.setTextColor(colors.red)
         term.write("No items in "..(source=="inventory" and "inventory" or "vault"))
         term.setCursorPos(2,5) term.setTextColor(colors.gray) term.write("Press any key...")
-        os.pullEvent("key") return nil
+        os.pullEvent() return nil
     end
     local scroll=0
     while true do
@@ -1002,7 +1002,7 @@ local function marketBrowse()
                                 term.setTextColor(colors.red) term.write((r and r.err) or "Failed")
                             end
                             term.setCursorPos(1,7) term.setTextColor(colors.gray) term.write("Press any key...")
-                            os.pullEvent("key")
+                            os.pullEvent()
                             return true
                         end
                     else
@@ -1148,7 +1148,7 @@ local function marketAddListing()
                         term.setTextColor(colors.red) term.write((r and r.err) or "Failed")
                     end
                     term.setCursorPos(1,6) term.setTextColor(colors.gray) term.write("Press any key...")
-                    os.pullEvent("key") return
+                    os.pullEvent() return
                 elseif p2>=11 and p2<=18 then return end
             end
         elseif ev=="key" and p1==keys.q then return end
@@ -1219,7 +1219,7 @@ local function marketMyListings()
                             if r and r.ok then term.setTextColor(colors.lime) term.write("Added "..r.added.." lot(s). Stock: "..r.stock)
                             else term.setTextColor(colors.red) term.write((r and r.err) or "Failed") end
                             term.setCursorPos(1,5) term.setTextColor(colors.gray) term.write("Press any key...")
-                            os.pullEvent("key") needFetch=true
+                            os.pullEvent() needFetch=true
                         end
                     end
                 elseif sub==2 then
@@ -1233,7 +1233,7 @@ local function marketMyListings()
                         end
                     else term.setTextColor(colors.red) term.write((r and r.err) or "Failed") end
                     term.setCursorPos(1,6) term.setTextColor(colors.gray) term.write("Press any key...")
-                    os.pullEvent("key") needFetch=true
+                    os.pullEvent() needFetch=true
                 end
             end
         elseif ev=="mouse_scroll" then
@@ -1535,7 +1535,7 @@ local function adminMenu()
                 term.setCursorPos(1,3) term.setTextColor(colors.red)
                 term.write((res and res.err) or "Bank server error")
                 term.setCursorPos(1,5) term.setTextColor(colors.gray) term.write("Press any key...")
-                os.pullEvent("key")
+                os.pullEvent()
             else
                 local lines = {}
                 table.insert(lines, "Vault:  " .. (res.vault_spurs or 0) .. " sp")
