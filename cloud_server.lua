@@ -476,24 +476,27 @@ local function handle(cid, msg)
         if not acc.vault or not peripheral.isPresent(acc.vault) then
             rednet.send(cid, {ok=false, err="No vault configured"}, PROTOCOL) return
         end
+        if not acc.invmanager or not peripheral.isPresent(acc.invmanager) then
+            rednet.send(cid, {ok=false, err="No inventory manager"}, PROTOCOL) return
+        end
         if countSpurs(BANK_VAULT) < amount then
             rednet.send(cid, {ok=false, err="Bank vault low on reserves"}, PROTOCOL) return
         end
         local moved = moveSpurs(BANK_VAULT, acc.vault, amount)
         if moved == 0 then rednet.send(cid, {ok=false, err="Transfer failed"}, PROTOCOL) return end
+        -- Push directly to player inventory; reverse if inventory full
+        local ok3, given = pcall(function()
+            return peripheral.call(acc.invmanager, "addItemToPlayer",
+                acc.vaultDir or "back", {name=SPUR_ID, count=moved})
+        end)
+        if not ok3 or not given or given == 0 then
+            moveSpurs(acc.vault, BANK_VAULT, moved)
+            rednet.send(cid, {ok=false, err="Inventory full! Clear space first"}, PROTOCOL) return
+        end
         b.balance = b.balance - moved
         addBankLog(uname, "Withdrew " .. moved .. " sp")
         saveBank()
-        -- Try to push directly to player's inventory
-        local inVault = true
-        if acc.invmanager and peripheral.isPresent(acc.invmanager) then
-            local ok3, given = pcall(function()
-                return peripheral.call(acc.invmanager, "addItemToPlayer",
-                    acc.vaultDir or "back", {name=SPUR_ID, count=moved})
-            end)
-            if ok3 and given and given > 0 then inVault = false end
-        end
-        rednet.send(cid, {ok=true, moved=moved, balance=b.balance, inVault=inVault}, PROTOCOL)
+        rednet.send(cid, {ok=true, moved=moved, balance=b.balance}, PROTOCOL)
         print(uname .. " bank withdraw: " .. moved .. " sp")
 
     elseif msg.type == "bank_get_loan" then
