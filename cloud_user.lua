@@ -377,22 +377,24 @@ local function amountPicker(cfg)
     local maxA = math.min(cfg.max or cfg.available, cfg.available)
     if maxA < minA then return nil end
     local amount = minA
+    local unit = cfg.unit or "sp"
     local msg2 = "" local mt2 = 0
     while true do
         W, H = term.getSize()
         term.setBackgroundColor(colors.black) term.clear()
-        term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
+        term.setBackgroundColor(cfg.headerColor or colors.blue) term.setTextColor(colors.white)
         term.setCursorPos(1,1) term.clearLine()
         local hdr = " " .. cfg.title
         if #hdr > W-3 then hdr = hdr:sub(1,W-3) end
         term.write(hdr .. string.rep(" ", math.max(0,W-#hdr-3)) .. "[X]")
         term.setBackgroundColor(colors.black) term.setTextColor(colors.gray)
-        term.setCursorPos(2,3) term.write("Available: " .. cfg.available .. " sp")
+        local avLabel = cfg.availableLabel or ("Available: " .. cfg.available .. " " .. unit)
+        term.setCursorPos(2,3) term.write(avLabel:sub(1,W-2))
         if cfg.hint then
             term.setCursorPos(2,4) term.setTextColor(colors.lightBlue) term.write(cfg.hint:sub(1,W-2))
         end
         -- Amount display
-        local amtStr = tostring(amount) .. " sp"
+        local amtStr = tostring(amount) .. " " .. unit
         term.setCursorPos(math.max(1, math.floor((W-#amtStr)/2)+1), 6)
         term.setTextColor(colors.yellow) term.write(amtStr)
         -- Progress bar
@@ -848,7 +850,8 @@ local function pickItem(source)
         term.setBackgroundColor(colors.black) term.clear()
         term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
         term.setCursorPos(1,1) term.clearLine()
-        term.write(" Pick Item ["..#items.."]"..string.rep(" ",math.max(0,W-14)).."[X]")
+        local hdrPick = " Pick Item ["..#items.."]"
+        term.write(hdrPick..string.rep(" ",math.max(0,W-#hdrPick-3)).."[X]")
         for row=1,listH do
             local item=items[row+scroll]
             term.setCursorPos(1,row+1) term.setBackgroundColor(colors.black)
@@ -1112,7 +1115,9 @@ local function marketAddListing()
     W,H=term.getSize()
     term.setBackgroundColor(colors.black) term.clear()
     term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
-    term.setCursorPos(1,1) term.clearLine() term.write(" Create Listing")
+    term.setCursorPos(1,1) term.clearLine()
+    local hdrCL = " Create Listing"
+    term.write(hdrCL..string.rep(" ",math.max(0,W-#hdrCL-3)).."[X]")
     term.setBackgroundColor(colors.black)
     term.setCursorPos(2,3) term.setTextColor(colors.white)
     term.write(("Item:  "..(item.displayName or item.name)):sub(1,W-2))
@@ -1132,6 +1137,7 @@ local function marketAddListing()
     while true do
         local ev,p1,p2,p3=os.pullEvent()
         if ev=="mouse_click" then
+            if p3==1 and p2>=W-2 then return end
             if p3==H-1 then
                 if p2>=1 and p2<=8 then
                     local r=rpc({type="market_create_listing",token=token,
@@ -1211,15 +1217,36 @@ local function marketMyListings()
                     local s=clickMenu("Add Stock - Source",srcOpts)
                     if s and s~=3 then
                         local src2=s==1 and "inventory" or "vault"
-                        local lots=numInput("Add Lots","Add lots of "..l.lot_size.."x "..(l.display_name or "?"):sub(1,W-20),1,nil)
-                        if lots then
-                            local r=rpc({type="market_add_stock",token=token,listing_id=l.id,lots=lots,source=src2},15)
+                        local fetchRes=rpc({type=s==1 and "list_inventory" or "list_vault",token=token},8)
+                        local itemCount=0
+                        for _,it in ipairs((fetchRes and fetchRes.items) or {}) do
+                            if it.name==l.item_name then itemCount=it.count break end
+                        end
+                        local maxLots=math.floor(itemCount/l.lot_size)
+                        if maxLots<=0 then
                             term.setBackgroundColor(colors.black) term.clear()
-                            term.setCursorPos(1,3)
-                            if r and r.ok then term.setTextColor(colors.lime) term.write("Added "..r.added.." lot(s). Stock: "..r.stock)
-                            else term.setTextColor(colors.red) term.write((r and r.err) or "Failed") end
+                            term.setCursorPos(1,3) term.setTextColor(colors.red)
+                            term.write("Not enough items! Need "..l.lot_size.."x "..(l.display_name or l.item_name):sub(1,W-12))
                             term.setCursorPos(1,5) term.setTextColor(colors.gray) term.write("Press any key...")
-                            os.pullEvent() needFetch=true
+                            os.pullEvent()
+                        else
+                            local lots=amountPicker({
+                                title="Add Stock",
+                                headerColor=colors.orange,
+                                unit="lot(s)",
+                                available=maxLots,
+                                availableLabel="Have: "..itemCount.."x "..(l.display_name or l.item_name),
+                                hint="Lot size: "..l.lot_size.." item(s) each",
+                            })
+                            if lots then
+                                local r=rpc({type="market_add_stock",token=token,listing_id=l.id,lots=lots,source=src2},15)
+                                term.setBackgroundColor(colors.black) term.clear()
+                                term.setCursorPos(1,3)
+                                if r and r.ok then term.setTextColor(colors.lime) term.write("Added "..r.added.." lot(s). Stock: "..r.stock)
+                                else term.setTextColor(colors.red) term.write((r and r.err) or "Failed") end
+                                term.setCursorPos(1,5) term.setTextColor(colors.gray) term.write("Press any key...")
+                                os.pullEvent() needFetch=true
+                            end
                         end
                     end
                 elseif sub==2 then
