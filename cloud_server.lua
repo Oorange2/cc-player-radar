@@ -310,6 +310,21 @@ local function totalLoans()
     return t
 end
 
+local STALE_LISTING_MS = 3 * 86400000  -- 3 real days in milliseconds
+
+local function pruneStaleListings()
+    local now = os.epoch("utc")
+    local pruned = 0
+    for key, l in pairs(marketData.listings) do
+        if l.out_of_stock_ts and (now - l.out_of_stock_ts) > STALE_LISTING_MS then
+            marketData.listings[key] = nil
+            pruned = pruned + 1
+            print("Removed stale listing #"..tostring(l.id).." ("..tostring(l.item_name)..")")
+        end
+    end
+    if pruned > 0 then saveMarket() end
+end
+
 local function calcMarketTax(price)
     if price < 5 then return 0
     elseif price <= 20 then return 1
@@ -682,17 +697,19 @@ local function handle(cid, msg)
         end
         local nid = marketData.next_id
         marketData.next_id = nid + 1
+        local now_ts = os.epoch("utc")
         marketData.listings[tostring(nid)] = {
             id=nid, seller=uname,
             item_name=msg.item_name, display_name=msg.display_name or msg.item_name,
             lot_size=lot_size, price=price, stock=0,
-            listed_ts=os.epoch("utc"),
+            listed_ts=now_ts, out_of_stock_ts=now_ts,
         }
         saveMarket()
         rednet.send(cid,{ok=true,id=nid,merged=false,stock=0},PROTOCOL)
         print(uname.." created listing for "..msg.item_name)
 
     elseif msg.type == "market_list" then
+        pruneStaleListings()
         local active = {}
         for _, l in pairs(marketData.listings) do
             table.insert(active, {
@@ -788,6 +805,7 @@ local function handle(cid, msg)
         if rem > 0 then moveItem(MARKET_VAULT, acc.vault, l.item_name, rem) end
         if actual == 0 then rednet.send(cid,{ok=false,err="No items transferred"},PROTOCOL) return end
         l.stock = l.stock + actual
+        l.out_of_stock_ts = nil  -- restocked, reset expiry timer
         saveMarket()
         rednet.send(cid,{ok=true,added=actual,stock=l.stock},PROTOCOL)
 
@@ -832,6 +850,7 @@ local function handle(cid, msg)
         addBankLog(l.seller,"Sold "..totalItems.."x "..dn.." +"..sellerGets.."sp")
         bankData.market_revenue = (bankData.market_revenue or 0) + tax
         l.stock = l.stock - qty
+        if l.stock == 0 then l.out_of_stock_ts = os.epoch("utc") end
         saveMarket() saveBank()
         rednet.send(cid,{
             ok=true, item=dn, count=totalItems,
@@ -903,6 +922,7 @@ end
 
 print("Cloud server v3 online")
 print("Peripherals: " .. table.concat(peripheral.getNames(), ", "))
+pruneStaleListings()
 while true do
     local cid, msg = rednet.receive(PROTOCOL)
     handle(cid, msg)
