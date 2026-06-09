@@ -37,7 +37,7 @@ end
 local function doLogin()
     while true do
         term.setBackgroundColor(colors.black) term.clear()
-        term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
+        term.setBackgroundColor(colors.orange) term.setTextColor(colors.white)
         term.setCursorPos(1,1) term.clearLine() term.write(" Cloud Storage")
         term.setBackgroundColor(colors.black) term.setTextColor(colors.white)
         term.setCursorPos(1,3) term.write("Username: ")
@@ -106,7 +106,7 @@ local function itemListUI(cfg)
     local function draw()
         W, H = term.getSize()
         term.setBackgroundColor(colors.black) term.clear()
-        term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
+        term.setBackgroundColor(colors.orange) term.setTextColor(colors.white)
         term.setCursorPos(1, 1) term.clearLine()
         if searchMode then
             term.write(" /" .. searchQuery .. "_")
@@ -163,7 +163,7 @@ local function itemListUI(cfg)
         term.setBackgroundColor(colors.black) term.write(" ")
         term.setBackgroundColor(colors.gray)  term.write(" R Refresh ")
         term.setBackgroundColor(colors.black) term.write(" ")
-        term.setBackgroundColor(colors.blue)  term.write(" < Back ")
+        term.setBackgroundColor(colors.orange)  term.write(" < Back ")
         term.setCursorPos(1, H - 1) term.setBackgroundColor(colors.black)
         if message ~= "" and os.clock() < msgTimer then
             term.setTextColor(colors.lime) term.write(message:sub(1, W))
@@ -276,7 +276,7 @@ local function logScreen()
         W, H = term.getSize()
         local listH = H - 3
         term.setBackgroundColor(colors.black) term.clear()
-        term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
+        term.setBackgroundColor(colors.orange) term.setTextColor(colors.white)
         term.setCursorPos(1, 1) term.clearLine()
         local hdr = " Activity Log [" .. #log .. "]"
         term.write(hdr .. string.rep(" ", math.max(0, W - #hdr - 3)) .. "[X]")
@@ -296,7 +296,7 @@ local function logScreen()
             term.setCursorPos(W, H - 2) term.setBackgroundColor(colors.gray) term.setTextColor(colors.white) term.write("v")
         end
         term.setCursorPos(1, H - 1) term.setBackgroundColor(colors.black) term.clearLine()
-        term.setBackgroundColor(colors.blue) term.setTextColor(colors.white) term.write(" < Back ")
+        term.setBackgroundColor(colors.orange) term.setTextColor(colors.white) term.write(" < Back ")
         term.setBackgroundColor(colors.black) term.setTextColor(colors.gray) term.write("  Q=back")
         term.setCursorPos(1, H) term.setBackgroundColor(colors.black) term.write(string.rep(" ", W))
         local ev, p1, p2, p3 = os.pullEvent()
@@ -323,7 +323,7 @@ local function clickMenu(title, items, msg)
     while true do
         W, H = term.getSize()
         term.setBackgroundColor(colors.black) term.clear()
-        term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
+        term.setBackgroundColor(colors.orange) term.setTextColor(colors.white)
         term.setCursorPos(1, 1) term.clearLine()
         local hdr = " " .. title
         if #hdr > W - 3 then hdr = hdr:sub(1, W - 3) end
@@ -464,7 +464,7 @@ local function bankBlog()
         local lines=buildLines()
         local lh=H-3
         term.setBackgroundColor(colors.black) term.clear()
-        term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
+        term.setBackgroundColor(colors.orange) term.setTextColor(colors.white)
         term.setCursorPos(1,1) term.clearLine()
         local hdr=" Bank Log ["..#log.."]"
         term.write(hdr..string.rep(" ",math.max(0,W-#hdr-3)).."[X]")
@@ -479,7 +479,7 @@ local function bankBlog()
         if scroll>0 then term.setCursorPos(W,2) term.setBackgroundColor(colors.gray) term.setTextColor(colors.white) term.write("^") end
         if scroll+lh<#lines then term.setCursorPos(W,H-1) term.setBackgroundColor(colors.gray) term.setTextColor(colors.white) term.write("v") end
         term.setCursorPos(1,H-1) term.setBackgroundColor(colors.black) term.clearLine()
-        term.setBackgroundColor(colors.blue) term.setTextColor(colors.white) term.write(" < Back ")
+        term.setBackgroundColor(colors.orange) term.setTextColor(colors.white) term.write(" < Back ")
         term.setBackgroundColor(colors.black) term.setTextColor(colors.gray) term.write("  Q=back")
         term.setCursorPos(1,H) term.setBackgroundColor(colors.black) term.write(string.rep(" ",W))
         local ev,p1,p2,p3=os.pullEvent()
@@ -564,7 +564,7 @@ local function bankLoans(info)
     while true do
         W,H=term.getSize()
         term.setBackgroundColor(colors.black) term.clear()
-        term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
+        term.setBackgroundColor(colors.orange) term.setTextColor(colors.white)
         term.setCursorPos(1,1) term.clearLine()
         term.write(" Loans" .. string.rep(" ",math.max(0,W-9)) .. "[X]")
         term.setBackgroundColor(colors.black)
@@ -737,7 +737,7 @@ local function bankMenu()
         end
         W,H=term.getSize()
         term.setBackgroundColor(colors.black) term.clear()
-        term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
+        term.setBackgroundColor(colors.orange) term.setTextColor(colors.white)
         term.setCursorPos(1,1) term.clearLine()
         local hdr=" Bank - "..username
         if #hdr>W-3 then hdr=hdr:sub(1,W-3) end
@@ -811,7 +811,7 @@ local function numInput(title, hint, minV, maxV)
     while true do
         W,H=term.getSize()
         term.setBackgroundColor(colors.black) term.clear()
-        term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
+        term.setBackgroundColor(colors.orange) term.setTextColor(colors.white)
         term.setCursorPos(1,1) term.clearLine() term.write(" "..title)
         term.setBackgroundColor(colors.black)
         term.setCursorPos(2,3) term.setTextColor(colors.lightGray)
@@ -848,7 +848,7 @@ local function pickItem(source)
         W,H=term.getSize()
         local listH=H-2
         term.setBackgroundColor(colors.black) term.clear()
-        term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
+        term.setBackgroundColor(colors.orange) term.setTextColor(colors.white)
         term.setCursorPos(1,1) term.clearLine()
         local hdrPick = " Pick Item ["..#items.."]"
         term.write(hdrPick..string.rep(" ",math.max(0,W-#hdrPick-3)).."[X]")
@@ -920,7 +920,7 @@ local function marketBrowse()
             local buyLabel=" Buy ("..qty.." lot"..(qty>1 and "s" or "")..") "
             local cancelLabel=" Back "
             term.setBackgroundColor(colors.black) term.clear()
-            term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
+            term.setBackgroundColor(colors.orange) term.setTextColor(colors.white)
             term.setCursorPos(1,1) term.clearLine()
             term.write(" Listing"..string.rep(" ",math.max(0,W-11)).."[X]")
             term.setBackgroundColor(colors.black)
@@ -972,7 +972,7 @@ local function marketBrowse()
                 local gap=math.max(1,W-#buyLabel-#cancelLabel)
                 term.setBackgroundColor(colors.black) term.write(string.rep(" ",gap))
             end
-            term.setBackgroundColor(colors.blue) term.setTextColor(colors.white) term.write(cancelLabel)
+            term.setBackgroundColor(colors.orange) term.setTextColor(colors.white) term.write(cancelLabel)
             term.setCursorPos(1,H) term.setBackgroundColor(colors.black) term.write(string.rep(" ",W))
             local ev,p1,p2,p3=os.pullEvent()
             if ev=="term_resize" then W,H=term.getSize()
@@ -1020,7 +1020,7 @@ local function marketBrowse()
     while true do
         W,H=term.getSize()
         term.setBackgroundColor(colors.black) term.clear()
-        term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
+        term.setBackgroundColor(colors.orange) term.setTextColor(colors.white)
         term.setCursorPos(1,1) term.clearLine()
         if searchMode then term.write(" /"..searchQuery.."_")
         else
@@ -1053,7 +1053,7 @@ local function marketBrowse()
         term.setBackgroundColor(colors.black) term.write(" ")
         term.setBackgroundColor(colors.gray)  term.write(" R Refresh ")
         term.setBackgroundColor(colors.black) term.write(" ")
-        term.setBackgroundColor(colors.blue)  term.write(" < Back ")
+        term.setBackgroundColor(colors.orange)  term.write(" < Back ")
         -- Status
         term.setCursorPos(1,H-1) term.setBackgroundColor(colors.black)
         if message~="" and os.clock()<msgTimer then
@@ -1103,8 +1103,15 @@ end
 
 -- Add a new listing (just defines item/lot/price; stock added via My Listings)
 local function marketAddListing()
-    -- Pick item from vault to identify it (nothing is moved)
-    local item=pickItem("vault")
+    -- Ask where to pick the item from
+    local srcOpts={
+        {label="From Inventory", icon=colors.orange},
+        {label="From Vault",     icon=colors.cyan  },
+        {label="Back",           icon=colors.gray  },
+    }
+    local s=clickMenu("Add Listing - Source",srcOpts)
+    if not s or s==3 then return end
+    local item=pickItem(s==1 and "inventory" or "vault")
     if not item then return end
     local lot_size=numInput("Lot Size","Items per purchase (have "..item.count.."x)",1,item.count)
     if not lot_size then return end
@@ -1114,7 +1121,7 @@ local function marketAddListing()
     -- Summary screen
     W,H=term.getSize()
     term.setBackgroundColor(colors.black) term.clear()
-    term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
+    term.setBackgroundColor(colors.orange) term.setTextColor(colors.white)
     term.setCursorPos(1,1) term.clearLine()
     local hdrCL = " Create Listing"
     term.write(hdrCL..string.rep(" ",math.max(0,W-#hdrCL-3)).."[X]")
@@ -1173,7 +1180,7 @@ local function marketMyListings()
         W,H=term.getSize()
         local listH=H-3
         term.setBackgroundColor(colors.black) term.clear()
-        term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
+        term.setBackgroundColor(colors.orange) term.setTextColor(colors.white)
         term.setCursorPos(1,1) term.clearLine()
         term.write(" My Listings ["..#listings.."]"..string.rep(" ",math.max(0,W-18)).."[X]")
         for row=1,listH do
@@ -1194,7 +1201,7 @@ local function marketMyListings()
         if scroll>0 then term.setCursorPos(W,2) term.setBackgroundColor(colors.gray) term.setTextColor(colors.white) term.write("^") end
         if scroll+listH<#listings then term.setCursorPos(W,H-1) term.setBackgroundColor(colors.gray) term.setTextColor(colors.white) term.write("v") end
         term.setCursorPos(1,H-1) term.setBackgroundColor(colors.black) term.clearLine()
-        term.setBackgroundColor(colors.blue) term.write(" < Back ")
+        term.setBackgroundColor(colors.orange) term.write(" < Back ")
         term.setBackgroundColor(colors.black) term.setTextColor(colors.gray) term.write("  Click listing to manage")
         term.setCursorPos(1,H) term.setBackgroundColor(colors.black) term.write(string.rep(" ",W))
         local ev,p1,p2,p3=os.pullEvent()
@@ -1344,7 +1351,7 @@ local function pickUser()
         W, H = term.getSize()
         local listH = H - 2
         term.setBackgroundColor(colors.black) term.clear()
-        term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
+        term.setBackgroundColor(colors.orange) term.setTextColor(colors.white)
         term.setCursorPos(1,1) term.clearLine()
         term.write(" Select User [" .. #ulist .. "]" .. string.rep(" ", math.max(0, W - 17)) .. "[X]")
         for row = 1, listH do
@@ -1408,7 +1415,7 @@ local function adminMenu()
                 W, H = term.getSize()
                 local listH = H - 2
                 term.setBackgroundColor(colors.black) term.clear()
-                term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
+                term.setBackgroundColor(colors.orange) term.setTextColor(colors.white)
                 term.setCursorPos(1,1) term.clearLine()
                 term.write(" Users [" .. #users .. "]" .. string.rep(" ", math.max(0, W - 12)) .. "[X]")
                 for row = 1, listH do
@@ -1441,7 +1448,7 @@ local function adminMenu()
         elseif sel == 2 then
             -- Create user (text input, keyboard only)
             term.setBackgroundColor(colors.black) term.clear()
-            term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
+            term.setBackgroundColor(colors.orange) term.setTextColor(colors.white)
             term.setCursorPos(1,1) term.clearLine() term.write(" Create User")
             term.setBackgroundColor(colors.black) term.setTextColor(colors.white)
             local function prompt(row, label)
@@ -1528,7 +1535,7 @@ local function adminMenu()
                 W, H = term.getSize()
                 local listH = H - 2
                 term.setBackgroundColor(colors.black) term.clear()
-                term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
+                term.setBackgroundColor(colors.orange) term.setTextColor(colors.white)
                 term.setCursorPos(1,1) term.clearLine()
                 term.write(" Peripherals [" .. #names .. "]" .. string.rep(" ", math.max(0, W - 18)) .. "[X]")
                 for row = 1, listH do
@@ -1579,7 +1586,7 @@ local function adminMenu()
                     W, H = term.getSize()
                     local lh = H - 2
                     term.setBackgroundColor(colors.black) term.clear()
-                    term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
+                    term.setBackgroundColor(colors.orange) term.setTextColor(colors.white)
                     term.setCursorPos(1,1) term.clearLine()
                     term.write(" Bank Overview" .. string.rep(" ", math.max(0, W-17)) .. "[X]")
                     for row = 1, lh do
