@@ -310,21 +310,6 @@ local function totalLoans()
     return t
 end
 
-local STALE_LISTING_MS = 3 * 86400000  -- 3 real days in milliseconds
-
-local function pruneStaleListings()
-    local now = os.epoch("utc")
-    local pruned = 0
-    for key, l in pairs(marketData.listings) do
-        if l.out_of_stock_ts and (now - l.out_of_stock_ts) > STALE_LISTING_MS then
-            marketData.listings[key] = nil
-            pruned = pruned + 1
-            print("Removed stale listing #"..tostring(l.id).." ("..tostring(l.item_name)..")")
-        end
-    end
-    if pruned > 0 then saveMarket() end
-end
-
 local function calcMarketTax(price)
     if price < 5 then return 0
     elseif price <= 20 then return 1
@@ -346,6 +331,20 @@ local function loadMarket()
     if not marketData.next_id  then marketData.next_id  = 1  end
 end
 loadMarket()
+
+local STALE_LISTING_MS = 3 * 86400000  -- 3 real days in milliseconds
+local function pruneStaleListings()
+    local now = os.epoch("utc")
+    local pruned = 0
+    for key, l in pairs(marketData.listings) do
+        if l.out_of_stock_ts and (now - l.out_of_stock_ts) > STALE_LISTING_MS then
+            marketData.listings[key] = nil
+            pruned = pruned + 1
+            print("Removed stale listing #"..tostring(l.id).." ("..tostring(l.item_name)..")")
+        end
+    end
+    if pruned > 0 then saveMarket() end
+end
 
 -- ── Message handler ──────────────────────────────────────────────────────────
 local function handle(cid, msg)
