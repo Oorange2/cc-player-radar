@@ -1750,9 +1750,11 @@ local function adminMenu()
                 os.pullEvent()
             else
                 local lines = {}
-                table.insert(lines, "Vault:  " .. (res.vault_spurs or 0) .. " sp")
-                table.insert(lines, "Deps:   " .. (res.total_dep  or 0) .. " sp")
-                table.insert(lines, "Loans:  " .. (res.total_loans or 0) .. " sp")
+                table.insert(lines, "Vault:    " .. (res.vault_spurs  or 0) .. " sp")
+                table.insert(lines, "Bank bal: " .. (res.bank_balance or 0) .. " sp")
+                table.insert(lines, "Deps:     " .. (res.total_dep    or 0) .. " sp")
+                table.insert(lines, "Loans:    " .. (res.total_loans  or 0) .. " sp")
+                table.insert(lines, "Int/day:  " .. (res.daily_int    or 0) .. " sp")
                 table.insert(lines, string.rep("-", W))
                 for _, u in ipairs(res.users or {}) do
                     local lstr = u.loan and (" L:"..u.loan.remaining) or ""
