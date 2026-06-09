@@ -444,21 +444,38 @@ local function bankBlog()
     local res = rpc({type="bank_get_log", token=token})
     local log = (res and res.log) or {}
     local scroll = 0
+    local function buildLines()
+        local lines={}
+        for _,e in ipairs(log) do
+            local ev=e.event or ""
+            -- First line: up to W-1 chars
+            table.insert(lines,{text=ev:sub(1,W-1),color=colors.white})
+            -- Overflow onto second line if needed
+            if #ev>=W then
+                table.insert(lines,{text="  "..ev:sub(W,W+W-4),color=colors.lightGray})
+            end
+        end
+        return lines
+    end
     while true do
-        W,H=term.getSize() local lh=H-3
+        W,H=term.getSize()
+        local lines=buildLines()
+        local lh=H-3
         term.setBackgroundColor(colors.black) term.clear()
         term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
         term.setCursorPos(1,1) term.clearLine()
         local hdr=" Bank Log ["..#log.."]"
         term.write(hdr..string.rep(" ",math.max(0,W-#hdr-3)).."[X]")
         for row=1,lh do
-            local e=log[row+scroll]
+            local ln=lines[row+scroll]
             term.setCursorPos(1,row+1) term.setBackgroundColor(colors.black)
-            if e then term.setTextColor(colors.white) term.write((e.event or ""):sub(1,W))
+            if ln then
+                term.setTextColor(ln.color)
+                term.write(ln.text..string.rep(" ",math.max(0,W-#ln.text)))
             else term.setTextColor(colors.black) term.write(string.rep(" ",W)) end
         end
         if scroll>0 then term.setCursorPos(W,2) term.setBackgroundColor(colors.gray) term.setTextColor(colors.white) term.write("^") end
-        if scroll+lh<#log then term.setCursorPos(W,H-1) term.setBackgroundColor(colors.gray) term.setTextColor(colors.white) term.write("v") end
+        if scroll+lh<#lines then term.setCursorPos(W,H-1) term.setBackgroundColor(colors.gray) term.setTextColor(colors.white) term.write("v") end
         term.setCursorPos(1,H-1) term.setBackgroundColor(colors.black) term.clearLine()
         term.setBackgroundColor(colors.blue) term.setTextColor(colors.white) term.write(" < Back ")
         term.setBackgroundColor(colors.black) term.setTextColor(colors.gray) term.write("  Q=back")
@@ -468,11 +485,11 @@ local function bankBlog()
         elseif ev=="mouse_click" then
             local mx,my=p2,p3
             if (my==1 and mx>=W-2) or (my==H-1 and mx<=8) then return end
-        elseif ev=="mouse_scroll" then scroll=math.max(0,math.min(scroll+p1,math.max(0,#log-lh)))
+        elseif ev=="mouse_scroll" then scroll=math.max(0,math.min(scroll+p1,math.max(0,#lines-lh)))
         elseif ev=="key" then
             if p1==keys.q then return
             elseif p1==keys.up then scroll=math.max(0,scroll-1)
-            elseif p1==keys.down then scroll=math.min(math.max(0,#log-lh),scroll+1) end
+            elseif p1==keys.down then scroll=math.min(math.max(0,#lines-lh),scroll+1) end
         end
     end
 end
@@ -784,6 +801,12 @@ local function bankMenu()
         elseif ev=="key" and p1==keys.q then return end
     end
 end
+local function calcTax(price)
+    if price < 5 then return 0
+    elseif price <= 20 then return 1
+    else return math.floor(price * 0.05) end
+end
+
 -- ── Market UI ────────────────────────────────────────────────────────────────
 
 -- Numeric keyboard input (used for price, lot size, etc.)
@@ -863,7 +886,7 @@ end
 -- Browse & buy market listings
 local function marketBrowse()
     local listings,filtered={},{}
-    local scroll=0 local selId=nil
+    local scroll=0
     local searchMode=false local searchQuery=""
     local message="" local msgTimer=0
     local LIST_TOP=2
@@ -882,8 +905,119 @@ local function marketBrowse()
                     table.insert(filtered,l) end
             end
         end
-        scroll=0 selId=nil
+        scroll=0
     end
+
+    -- Listing detail / buy page; returns true if a purchase was made
+    local function showDetail(l)
+        local bi=rpc({type="bank_info",token=token},5)
+        local bal=(bi and bi.balance) or 0
+        local qty=1
+        local maxQty=math.max(1,l.stock)
+        local tax=calcTax(l.price)
+        while true do
+            W,H=term.getSize()
+            local totalPrice=l.price*qty
+            local canBuy=(l.stock>0) and (bal>=totalPrice)
+            local buyLabel=" Buy ("..qty.." lot"..(qty>1 and "s" or "")..") "
+            local cancelLabel=" Back "
+            term.setBackgroundColor(colors.black) term.clear()
+            term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
+            term.setCursorPos(1,1) term.clearLine()
+            term.write(" Listing"..string.rep(" ",math.max(0,W-11)).."[X]")
+            term.setBackgroundColor(colors.black)
+            -- Item + seller
+            term.setCursorPos(2,2) term.setTextColor(itemColor(l.item_name)) term.write("■ ")
+            term.setTextColor(colors.white) term.write((l.display_name or l.item_name):sub(1,W-4))
+            term.setCursorPos(2,3) term.setTextColor(colors.gray) term.write("By: ")
+            term.setTextColor(colors.yellow) term.write((l.seller or "?"):sub(1,W-6))
+            -- Lot & price
+            term.setCursorPos(2,4) term.setTextColor(colors.gray)
+            term.write(("Lot:  "..l.lot_size.." item(s) / purchase"):sub(1,W-2))
+            term.setCursorPos(2,5) term.setTextColor(colors.gray)
+            term.write("Price: "..l.price.." sp each")
+            -- Stock
+            term.setCursorPos(2,6)
+            if l.stock<=0 then term.setTextColor(colors.red) term.write("OUT OF STOCK")
+            else term.setTextColor(colors.lime) term.write("Stock: "..l.stock.." lot(s)") end
+            -- Tax tier
+            term.setCursorPos(2,7) term.setTextColor(colors.orange)
+            if tax==0 then term.write("No fee (under 5 sp)")
+            elseif tax==1 then term.write("Flat 1 sp fee (5-20 sp)")
+            else term.write("5% fee: "..tax.." sp/lot") end
+            -- Divider
+            term.setCursorPos(1,8) term.setBackgroundColor(colors.black) term.setTextColor(colors.gray)
+            term.write(string.rep("-",W))
+            -- Qty selector (only if in stock)
+            if l.stock>0 then
+                term.setCursorPos(2,9) term.setTextColor(colors.white)
+                term.write("Qty: ")
+                term.setTextColor(colors.yellow) term.write(qty.." lot(s)")
+                term.setCursorPos(2,10) term.setTextColor(colors.gray) term.write("  scroll to change")
+                -- Summary
+                term.setCursorPos(2,11) term.setTextColor(colors.white)
+                term.write(("Total: "..totalPrice.." sp"):sub(1,W-2))
+                term.setCursorPos(2,12)
+                if bal>=totalPrice then
+                    term.setTextColor(colors.lime)
+                    term.write(("After: "..(bal-totalPrice).." sp"):sub(1,W-2))
+                else
+                    term.setTextColor(colors.red)
+                    term.write(("Need "..(totalPrice-bal).." more sp!"):sub(1,W-2))
+                end
+            end
+            -- Buttons
+            term.setCursorPos(1,H-1) term.setBackgroundColor(colors.black) term.clearLine()
+            if l.stock>0 then
+                local buyBg = canBuy and colors.green or colors.gray
+                term.setBackgroundColor(buyBg) term.setTextColor(colors.white) term.write(buyLabel)
+                local gap=math.max(1,W-#buyLabel-#cancelLabel)
+                term.setBackgroundColor(colors.black) term.write(string.rep(" ",gap))
+            end
+            term.setBackgroundColor(colors.blue) term.setTextColor(colors.white) term.write(cancelLabel)
+            term.setCursorPos(1,H) term.setBackgroundColor(colors.black) term.write(string.rep(" ",W))
+            local ev,p1,p2,p3=os.pullEvent()
+            if ev=="term_resize" then W,H=term.getSize()
+            elseif ev=="mouse_scroll" then
+                if l.stock>0 then qty=math.max(1,math.min(maxQty,qty-p1)) end
+            elseif ev=="key" then
+                if p1==keys.q then return false
+                elseif p1==keys.up   then qty=math.min(maxQty,qty+1)
+                elseif p1==keys.down then qty=math.max(1,qty-1) end
+            elseif ev=="mouse_click" then
+                local mx,my=p2,p3
+                if my==1 and mx>=W-2 then return false end
+                if my==H-1 then
+                    if l.stock>0 and mx<=#buyLabel then
+                        if not canBuy then
+                            -- flash message — just redraw, nothing to do
+                        else
+                            local r=rpc({type="market_buy",token=token,listing_id=l.id,quantity=qty},15)
+                            term.setBackgroundColor(colors.black) term.clear()
+                            term.setCursorPos(1,3)
+                            if r and r.ok then
+                                term.setTextColor(colors.lime)
+                                term.write(("Bought! "..r.count.."x "..r.item):sub(1,W-2))
+                                term.setCursorPos(1,4) term.setTextColor(colors.gray)
+                                term.write(("Paid: "..r.price.." sp  Bal: "..r.new_balance.." sp"):sub(1,W-2))
+                                term.setCursorPos(1,5)
+                                if r.inVault then term.setTextColor(colors.yellow) term.write("Items in vault (inv full)")
+                                else term.setTextColor(colors.lime) term.write("Items sent to inventory!") end
+                            else
+                                term.setTextColor(colors.red) term.write((r and r.err) or "Failed")
+                            end
+                            term.setCursorPos(1,7) term.setTextColor(colors.gray) term.write("Press any key...")
+                            os.pullEvent("key")
+                            return true
+                        end
+                    else
+                        return false
+                    end
+                end
+            end
+        end
+    end
+
     doFetch() applyFilter()
     while true do
         W,H=term.getSize()
@@ -901,8 +1035,6 @@ local function marketBrowse()
             term.setCursorPos(1,y) term.setBackgroundColor(colors.black)
             if l then
                 local oos=(l.stock<=0)
-                local isSel=(selId==l.id)
-                term.setBackgroundColor(isSel and colors.gray or colors.black)
                 term.setTextColor(oos and colors.gray or itemColor(l.item_name)) term.write(" ")
                 local info=" x"..l.lot_size.."@"..l.price.."sp"
                 local sc=oos and " OOS" or (" ["..l.stock.."]")
@@ -930,7 +1062,7 @@ local function marketBrowse()
             term.setTextColor(colors.lime) term.write(message:sub(1,W))
         else
             message=""
-            term.setTextColor(colors.gray) term.write("Click=select  2x=buy  5% tax on seller")
+            term.setTextColor(colors.gray) term.write("Click listing to view")
         end
         term.setCursorPos(1,H) term.setBackgroundColor(colors.black) term.write(string.rep(" ",W))
         local ev,p1,p2,p3=os.pullEvent()
@@ -962,58 +1094,8 @@ local function marketBrowse()
                     local idx=row+scroll
                     local l=filtered[idx]
                     if l then
-                        if l.stock<=0 then message="Out of stock!" msgTimer=os.clock()+1.5
-                        elseif selId==l.id then
-                            -- Confirm buy
-                            local bi=rpc({type="bank_info",token=token},5)
-                            local bal=(bi and bi.balance) or 0
-                            local tax=math.max(1,math.floor(l.price*0.05))
-                            term.setBackgroundColor(colors.black) term.clear()
-                            term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
-                            term.setCursorPos(1,1) term.clearLine() term.write(" Confirm Purchase")
-                            term.setBackgroundColor(colors.black)
-                            term.setCursorPos(2,3) term.setTextColor(colors.white)
-                            term.write(("Buy: "..l.lot_size.."x "..(l.display_name or l.item_name)):sub(1,W-2))
-                            term.setCursorPos(2,4) term.write("Price:   "..l.price.." sp")
-                            term.setCursorPos(2,5) term.write("Balance: "..bal.." sp")
-                            term.setCursorPos(2,6) term.setTextColor(bal>=l.price and colors.lime or colors.red)
-                            term.write("After:   "..(bal-l.price).." sp")
-                            term.setCursorPos(2,7) term.setTextColor(colors.orange)
-                            term.write(("Seller gets "..(l.price-tax).." sp (-5% tax)"):sub(1,W-2))
-                            term.setCursorPos(1,H-1) term.setBackgroundColor(colors.black) term.clearLine()
-                            term.setBackgroundColor(colors.green) term.setTextColor(colors.white) term.write(" Confirm ")
-                            term.setBackgroundColor(colors.black) term.write("  ")
-                            term.setBackgroundColor(colors.red) term.write(" Cancel ")
-                            term.setCursorPos(1,H) term.setBackgroundColor(colors.black) term.write(string.rep(" ",W))
-                            local done=false
-                            while not done do
-                                local ev2,q1,q2,q3=os.pullEvent()
-                                if ev2=="mouse_click" then
-                                    if q3==H-1 then
-                                        if q2>=1 and q2<=9 then
-                                            local r=rpc({type="market_buy",token=token,listing_id=l.id},15)
-                                            term.setBackgroundColor(colors.black) term.clear()
-                                            term.setCursorPos(1,3)
-                                            if r and r.ok then
-                                                term.setTextColor(colors.lime)
-                                                term.write(("Bought! "..r.count.."x "..r.item):sub(1,W-2))
-                                                term.setCursorPos(1,4) term.setTextColor(colors.gray)
-                                                term.write("Paid: "..r.price.." sp  Bal: "..r.new_balance.." sp")
-                                                term.setCursorPos(1,5)
-                                                if r.inVault then term.setTextColor(colors.yellow) term.write("Items in vault (inv full)")
-                                                else term.setTextColor(colors.lime) term.write("Items sent to inventory!") end
-                                            else
-                                                term.setTextColor(colors.red) term.write((r and r.err) or "Failed")
-                                            end
-                                            term.setCursorPos(1,7) term.setTextColor(colors.gray) term.write("Press any key...")
-                                            os.pullEvent("key")
-                                            doFetch() applyFilter() done=true
-                                        elseif q2>=12 and q2<=19 then done=true end
-                                    end
-                                elseif ev2=="key" and q1==keys.q then done=true end
-                            end
-                            selId=nil
-                        else selId=l.id end
+                        local bought=showDetail(l)
+                        if bought then doFetch() applyFilter() end
                     end
                 end
             end
@@ -1021,40 +1103,34 @@ local function marketBrowse()
     end
 end
 
--- Add a new listing
+-- Add a new listing (just defines item/lot/price; stock added via My Listings)
 local function marketAddListing()
-    local srcItems={
-        {label="From Inventory",icon=colors.orange},
-        {label="From Vault",icon=colors.cyan},
-        {label="Back",icon=colors.gray},
-    }
-    local src=clickMenu("Add Listing - Source",srcItems)
-    if src==nil or src==3 then return end
-    local source=src==1 and "inventory" or "vault"
-    local item=pickItem(source)
+    -- Pick item from vault to identify it (nothing is moved)
+    local item=pickItem("vault")
     if not item then return end
-    local lot_size=numInput("Lot Size","Items per purchase",1,item.count)
+    local lot_size=numInput("Lot Size","Items per purchase (have "..item.count.."x)",1,item.count)
     if not lot_size then return end
-    local price=numInput("Price per Lot","Spurs for "..lot_size.."x "..(item.displayName or item.name):sub(1,W-20),1,nil)
-    if not price then return end
-    local maxLots=math.floor(item.count/lot_size)
-    local lots=numInput("How many lots?","List 1-"..maxLots.." lots of "..lot_size.."x",1,maxLots)
-    if not lots then return end
-    -- Summary
+    local price=numInput("Price per Lot",lot_size.."x "..(item.displayName or item.name):sub(1,W-12).." for?",0,nil)
+    if price==nil then return end
+    local tax=calcTax(price)
+    -- Summary screen
     W,H=term.getSize()
     term.setBackgroundColor(colors.black) term.clear()
     term.setBackgroundColor(colors.blue) term.setTextColor(colors.white)
-    term.setCursorPos(1,1) term.clearLine() term.write(" Confirm Listing")
+    term.setCursorPos(1,1) term.clearLine() term.write(" Create Listing")
     term.setBackgroundColor(colors.black)
     term.setCursorPos(2,3) term.setTextColor(colors.white)
     term.write(("Item:  "..(item.displayName or item.name)):sub(1,W-2))
-    term.setCursorPos(2,4) term.write("Lot:   "..lot_size.." items per sale")
+    term.setCursorPos(2,4) term.write("Lot:   "..lot_size.." item(s) per sale")
     term.setCursorPos(2,5) term.write("Price: "..price.." sp per lot")
-    term.setCursorPos(2,6) term.write("Stock: "..lots.." lot(s) = "..lots*lot_size.." items")
-    term.setCursorPos(2,7) term.setTextColor(colors.orange)
-    term.write("5% tax deducted per sale")
+    term.setCursorPos(2,6) term.setTextColor(colors.cyan) term.write("Starts with 0 stock")
+    term.setCursorPos(2,7) term.setTextColor(colors.gray) term.write("Add stock in My Listings")
+    term.setCursorPos(2,9) term.setTextColor(colors.orange)
+    if tax==0 then term.write("No fee per sale (<5 sp)")
+    elseif tax==1 then term.write("Flat 1 sp fee/sale (5-20 sp)")
+    else term.write("Fee: "..tax.." sp/sale (5%)") end
     term.setCursorPos(1,H-1) term.setBackgroundColor(colors.black) term.clearLine()
-    term.setBackgroundColor(colors.green) term.setTextColor(colors.white) term.write(" List It ")
+    term.setBackgroundColor(colors.green) term.setTextColor(colors.white) term.write(" Create ")
     term.setBackgroundColor(colors.black) term.write("  ")
     term.setBackgroundColor(colors.red) term.write(" Cancel ")
     term.setCursorPos(1,H) term.setBackgroundColor(colors.black) term.write(string.rep(" ",W))
@@ -1062,25 +1138,23 @@ local function marketAddListing()
         local ev,p1,p2,p3=os.pullEvent()
         if ev=="mouse_click" then
             if p3==H-1 then
-                if p2>=1 and p2<=9 then
-                    local r=rpc({type="market_sell",token=token,
+                if p2>=1 and p2<=8 then
+                    local r=rpc({type="market_create_listing",token=token,
                         item_name=item.name,display_name=item.displayName or item.name,
-                        lot_size=lot_size,price=price,lots=lots,source=source},20)
+                        lot_size=lot_size,price=price},10)
                     term.setBackgroundColor(colors.black) term.clear()
                     term.setCursorPos(1,3)
                     if r and r.ok then
                         term.setTextColor(colors.lime)
-                        term.write("Listed! "..r.lots.." lot(s)  Stock: "..r.stock)
-                        if r.merged then
-                            term.setCursorPos(1,4) term.setTextColor(colors.cyan)
-                            term.write("Merged into existing listing")
-                        end
+                        if r.merged then term.write("Listing already exists!")
+                        else term.write("Listing created!") end
+                        term.setCursorPos(1,4) term.setTextColor(colors.cyan) term.write("Add stock in My Listings")
                     else
                         term.setTextColor(colors.red) term.write((r and r.err) or "Failed")
                     end
                     term.setCursorPos(1,6) term.setTextColor(colors.gray) term.write("Press any key...")
                     os.pullEvent("key") return
-                elseif p2>=12 and p2<=19 then return end
+                elseif p2>=11 and p2<=18 then return end
             end
         elseif ev=="key" and p1==keys.q then return end
     end
@@ -1191,37 +1265,49 @@ local function marketMenu()
     end
 end
 
--- User menu
-local function userMenu()
-    local menuItems = {
-        { label="Withdraw", icon=colors.green  },
-        { label="Deposit",  icon=colors.blue   },
-        { label="Log",      icon=colors.gray   },
-        { label="Bank",     icon=colors.yellow },
-        { label="Market",   icon=colors.orange },
-        { label="Logout",   icon=colors.red    },
+-- Cloud Storage submenu (vault withdraw, deposit, transaction log)
+local function cloudStorageMenu()
+    local items={
+        {label="Withdraw", icon=colors.green},
+        {label="Deposit",  icon=colors.blue},
+        {label="Log",      icon=colors.gray},
+        {label="Back",     icon=colors.red},
     }
     while true do
-        local sel = clickMenu("Cloud - " .. username, menuItems)
-        if sel == nil or sel == 6 then token=nil username=nil isAdmin=false return
-        elseif sel == 1 then
-            itemListUI({ title="Withdraw", actionLabel="Withdrew",
+        local sel=clickMenu("Cloud Storage",items)
+        if sel==nil or sel==4 then return
+        elseif sel==1 then
+            itemListUI({title="Withdraw",actionLabel="Withdrew",
                 fetchFn=function() local r=rpc({type="list_vault",token=token}) return r or {} end,
                 actionFn=function(item,amt)
                     local r=rpc({type="withdraw",token=token,name=item.name,displayName=item.displayName,count=amt},10)
-                    return r and r.ok, r and r.err end })
-        elseif sel == 2 then
-            itemListUI({ title="Deposit", actionLabel="Deposited",
+                    return r and r.ok, r and r.err end})
+        elseif sel==2 then
+            itemListUI({title="Deposit",actionLabel="Deposited",
                 fetchFn=function() local r=rpc({type="list_inventory",token=token}) return r or {} end,
                 actionFn=function(item,amt)
                     local r=rpc({type="deposit",token=token,name=item.name,displayName=item.displayName,count=amt},10)
-                    return r and r.ok, r and r.err end })
-        elseif sel == 3 then
+                    return r and r.ok, r and r.err end})
+        elseif sel==3 then
             logScreen()
-        elseif sel == 4 then
-            bankMenu()
-        elseif sel == 5 then
-            marketMenu()
+        end
+    end
+end
+
+-- User menu
+local function userMenu()
+    local menuItems={
+        {label="Cloud Storage", icon=colors.cyan  },
+        {label="Bank",          icon=colors.yellow},
+        {label="Market",        icon=colors.orange},
+        {label="Logout",        icon=colors.red   },
+    }
+    while true do
+        local sel=clickMenu("Cloud - "..username, menuItems)
+        if sel==nil or sel==4 then token=nil username=nil isAdmin=false return
+        elseif sel==1 then cloudStorageMenu()
+        elseif sel==2 then bankMenu()
+        elseif sel==3 then marketMenu()
         end
     end
 end
