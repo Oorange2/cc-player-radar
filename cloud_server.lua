@@ -371,7 +371,14 @@ local function handle(cid, msg)
         local admin = acc.isAdmin or msg.username == "admin"
         sessions[tok] = { username=msg.username, isAdmin=admin, exp=os.time()+3600 }
         if not admin then addLog(msg.username, "Logged in") end
-        rednet.send(cid, { ok=true, token=tok, isAdmin=admin }, PROTOCOL)
+        local unread = 0
+        if not admin then
+            local b = getBankAcc(msg.username)
+            for _, n in ipairs(b.notifications or {}) do
+                if not n.read then unread = unread + 1 end
+            end
+        end
+        rednet.send(cid, { ok=true, token=tok, isAdmin=admin, unread_notifs=unread }, PROTOCOL)
         print(msg.username .. " logged in")
         return
     end
