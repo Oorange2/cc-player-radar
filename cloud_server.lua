@@ -685,16 +685,22 @@ local function handle(cid, msg)
 
     elseif msg.type == "market_list" then
         pruneStaleListings()
+        local now = os.epoch("utc")
         local active = {}
         for _, l in pairs(marketData.listings) do
             table.insert(active, {
                 id=l.id, seller=l.seller,
                 item_name=l.item_name, display_name=l.display_name,
                 lot_size=l.lot_size, price=l.price, stock=l.stock,
-                listed_ts=l.listed_ts,
+                listed_ts=l.listed_ts, boost_ts=l.boost_ts,
             })
         end
-        table.sort(active, function(a,b) return (a.listed_ts or 0) > (b.listed_ts or 0) end)
+        table.sort(active, function(a,b)
+            local aBoosted = (a.boost_ts or 0) > now
+            local bBoosted = (b.boost_ts or 0) > now
+            if aBoosted ~= bBoosted then return aBoosted end
+            return (a.listed_ts or 0) > (b.listed_ts or 0)
+        end)
         rednet.send(cid, {ok=true, listings=active}, PROTOCOL)
 
     elseif msg.type == "market_sell" then
@@ -851,6 +857,46 @@ local function handle(cid, msg)
         marketData.listings[tostring(msg.listing_id)] = nil
         saveMarket()
         rednet.send(cid,{ok=true,returned=returned},PROTOCOL)
+
+    elseif msg.type == "market_edit_listing" then
+        local l = marketData.listings[tostring(msg.listing_id)]
+        if not l then rednet.send(cid,{ok=false,err="Listing not found"},PROTOCOL) return end
+        if l.seller ~= uname then rednet.send(cid,{ok=false,err="Not your listing"},PROTOCOL) return end
+        if msg.price ~= nil then
+            l.price = math.max(0, math.floor(tonumber(msg.price) or 0))
+        end
+        if msg.lot_size ~= nil then
+            if l.stock > 0 then
+                rednet.send(cid,{ok=false,err="Drain stock before changing lot size"},PROTOCOL) return
+            end
+            l.lot_size = math.max(1, math.floor(tonumber(msg.lot_size) or 1))
+        end
+        saveMarket()
+        rednet.send(cid,{ok=true,price=l.price,lot_size=l.lot_size},PROTOCOL)
+        print(uname.." edited listing #"..tostring(l.id))
+
+    elseif msg.type == "market_boost_listing" then
+        local l = marketData.listings[tostring(msg.listing_id)]
+        if not l then rednet.send(cid,{ok=false,err="Listing not found"},PROTOCOL) return end
+        if l.seller ~= uname then rednet.send(cid,{ok=false,err="Not your listing"},PROTOCOL) return end
+        local days = math.max(1, math.min(30, math.floor(tonumber(msg.days) or 1)))
+        local cost = days * 10
+        applyDepInterest(uname)
+        local b = getBankAcc(uname)
+        if b.balance < cost then
+            rednet.send(cid,{ok=false,err="Need "..cost.." sp (have "..b.balance.." sp)"},PROTOCOL) return
+        end
+        b.balance = b.balance - cost
+        bankData.market_revenue = (bankData.market_revenue or 0) + cost
+        if not bankData.market_sales then bankData.market_sales = {} end
+        local now = os.epoch("utc")
+        table.insert(bankData.market_sales, {ts=now, tax=cost})
+        l.boost_ts = math.max(now, l.boost_ts or 0) + days * 86400000
+        local daysLeft = math.ceil((l.boost_ts - now) / 86400000)
+        addBankLog(uname, "Boosted listing #"..l.id.." "..days.."d -"..cost.."sp")
+        saveMarket() saveBank()
+        rednet.send(cid,{ok=true,cost=cost,days_total=daysLeft},PROTOCOL)
+        print(uname.." boosted listing #"..tostring(l.id).." for "..days.."d")
 
     elseif msg.type == "market_my_listings" then
         local mine = {}
