@@ -953,6 +953,91 @@ local function handle(cid, msg)
             daily_dep_int  = daily_dep_int,
             market_revenue = mkt24,
         }, PROTOCOL)
+
+    -- ── Coinflip handlers ─────────────────────────────────────────────────────
+    elseif msg.type == "coinflip_create" then
+        local wager = math.max(1, math.floor(tonumber(msg.wager) or 0))
+        applyDepInterest(uname)
+        local b = getBankAcc(uname)
+        if b.balance < wager then
+            rednet.send(cid,{ok=false,err="Need "..wager.." sp (have "..b.balance.." sp)"},PROTOCOL) return
+        end
+        b.balance = b.balance - wager
+        if not bankData.coinflips    then bankData.coinflips    = {} end
+        if not bankData.next_flip_id then bankData.next_flip_id = 1  end
+        local fid = bankData.next_flip_id
+        bankData.next_flip_id = fid + 1
+        bankData.coinflips[tostring(fid)] = {
+            id=fid, creator=uname, wager=wager, created_ts=os.epoch("utc"),
+        }
+        addBankLog(uname, "Coinflip #"..fid.." created, wagered "..wager.." sp")
+        saveBank()
+        rednet.send(cid,{ok=true,id=fid,wager=wager},PROTOCOL)
+        print(uname.." created coinflip #"..fid.." for "..wager.." sp")
+
+    elseif msg.type == "coinflip_list" then
+        local open = {}
+        for _, f in pairs(bankData.coinflips or {}) do
+            if f.creator ~= uname then
+                table.insert(open, {id=f.id, creator=f.creator, wager=f.wager, created_ts=f.created_ts})
+            end
+        end
+        table.sort(open, function(a,b) return (a.created_ts or 0) > (b.created_ts or 0) end)
+        rednet.send(cid,{ok=true,flips=open},PROTOCOL)
+
+    elseif msg.type == "coinflip_join" then
+        local f = (bankData.coinflips or {})[tostring(msg.flip_id)]
+        if not f then rednet.send(cid,{ok=false,err="Coinflip not found (already taken?)"},PROTOCOL) return end
+        if f.creator == uname then rednet.send(cid,{ok=false,err="Cannot join your own coinflip"},PROTOCOL) return end
+        applyDepInterest(uname)
+        local b = getBankAcc(uname)
+        if b.balance < f.wager then
+            rednet.send(cid,{ok=false,err="Need "..f.wager.." sp (have "..b.balance.." sp)"},PROTOCOL) return
+        end
+        b.balance = b.balance - f.wager
+        math.randomseed(os.epoch("utc"))
+        local creatorWins = math.random() > 0.5
+        local winner = creatorWins and f.creator or uname
+        local loser  = creatorWins and uname or f.creator
+        local pot = f.wager * 2
+        local houseCut = math.max(1, math.floor(pot * 0.10))
+        local prize = pot - houseCut
+        local wb = getBankAcc(winner)
+        wb.balance = wb.balance + prize
+        bankData.market_revenue = (bankData.market_revenue or 0) + houseCut
+        if not bankData.market_sales then bankData.market_sales = {} end
+        table.insert(bankData.market_sales, {ts=os.epoch("utc"), tax=houseCut})
+        local youWon = (winner == uname)
+        addBankLog(uname,    "Coinflip #"..f.id.." vs "..f.creator.." "..(youWon and "WON +"..prize or "lost -"..f.wager).." sp")
+        addBankLog(f.creator,"Coinflip #"..f.id.." vs "..uname.." "..(creatorWins and "WON +"..prize or "lost -"..f.wager).." sp")
+        bankData.coinflips[tostring(msg.flip_id)] = nil
+        saveBank()
+        rednet.send(cid,{
+            ok=true, winner=winner, loser=loser, you_won=youWon,
+            prize=prize, wager=f.wager, house_cut=houseCut, new_balance=b.balance,
+        },PROTOCOL)
+        print("Coinflip #"..f.id..": "..winner.." beat "..loser.." prize="..prize.." house="..houseCut)
+
+    elseif msg.type == "coinflip_cancel" then
+        local f = (bankData.coinflips or {})[tostring(msg.flip_id)]
+        if not f then rednet.send(cid,{ok=false,err="Coinflip not found"},PROTOCOL) return end
+        if f.creator ~= uname then rednet.send(cid,{ok=false,err="Not your coinflip"},PROTOCOL) return end
+        local b = getBankAcc(uname)
+        b.balance = b.balance + f.wager
+        addBankLog(uname, "Coinflip #"..f.id.." cancelled, returned "..f.wager.." sp")
+        bankData.coinflips[tostring(msg.flip_id)] = nil
+        saveBank()
+        rednet.send(cid,{ok=true,returned=f.wager},PROTOCOL)
+
+    elseif msg.type == "coinflip_my_bets" then
+        local mine = {}
+        for _, f in pairs(bankData.coinflips or {}) do
+            if f.creator == uname then
+                table.insert(mine, {id=f.id, wager=f.wager, created_ts=f.created_ts})
+            end
+        end
+        table.sort(mine, function(a,b) return (a.created_ts or 0) > (b.created_ts or 0) end)
+        rednet.send(cid,{ok=true,bets=mine},PROTOCOL)
     end
 end
 
