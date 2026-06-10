@@ -198,6 +198,13 @@ local function addBankLog(uname, event)
     while #b.blog > 100 do table.remove(b.blog, 1) end
 end
 
+local function addNotif(uname, msg)
+    local b = getBankAcc(uname)
+    if not b.notifications then b.notifications = {} end
+    table.insert(b.notifications, { msg=msg, ts=os.epoch("utc"), read=false })
+    while #b.notifications > 50 do table.remove(b.notifications, 1) end
+end
+
 local function getLoanRate(credit)
     if credit >= 750 then return 6
     elseif credit >= 600 then return 8
@@ -658,6 +665,21 @@ local function handle(cid, msg)
         for i = #b.blog, 1, -1 do table.insert(out, b.blog[i]) end
         rednet.send(cid, {ok=true, log=out}, PROTOCOL)
 
+    elseif msg.type == "get_notif_count" then
+        local b = getBankAcc(uname)
+        local count = 0
+        for _, n in ipairs(b.notifications or {}) do
+            if not n.read then count = count + 1 end
+        end
+        rednet.send(cid, {ok=true, count=count}, PROTOCOL)
+
+    elseif msg.type == "get_notifications" then
+        local b = getBankAcc(uname)
+        local notifs = b.notifications or {}
+        for _, n in ipairs(notifs) do n.read = true end
+        saveBank()
+        rednet.send(cid, {ok=true, notifications=notifs}, PROTOCOL)
+
     -- ── Market handlers ───────────────────────────────────────────────────────
     elseif msg.type == "market_create_listing" then
         local lot_size = math.max(1, math.floor(tonumber(msg.lot_size) or 1))
@@ -829,6 +851,7 @@ local function handle(cid, msg)
         local sb = getBankAcc(l.seller)
         sb.balance = sb.balance + sellerGets
         addBankLog(l.seller,"Sold "..totalItems.."x "..dn.." +"..sellerGets.."sp")
+        addNotif(l.seller, uname.." bought "..totalItems.."x "..dn.." from your listing. +"..sellerGets.."sp (tax "..tax.."sp)")
         bankData.market_revenue = (bankData.market_revenue or 0) + tax
         if not bankData.market_sales then bankData.market_sales = {} end
         table.insert(bankData.market_sales, {ts=os.epoch("utc"), tax=tax})
@@ -1010,6 +1033,8 @@ local function handle(cid, msg)
         local youWon = (winner == uname)
         addBankLog(uname,    "Coinflip #"..f.id.." vs "..f.creator.." "..(youWon and "WON +"..prize or "lost -"..f.wager).." sp")
         addBankLog(f.creator,"Coinflip #"..f.id.." vs "..uname.." "..(creatorWins and "WON +"..prize or "lost -"..f.wager).." sp")
+        addNotif(uname,     "Coinflip #"..f.id.." vs "..f.creator..": "..(youWon and "YOU WON! +"..prize.."sp" or "you lost. -"..f.wager.."sp"))
+        addNotif(f.creator, "Coinflip #"..f.id..": "..uname.." joined your flip! "..(creatorWins and "YOU WON! +"..prize.."sp" or "you lost. -"..f.wager.."sp"))
         bankData.coinflips[tostring(msg.flip_id)] = nil
         saveBank()
         rednet.send(cid,{
