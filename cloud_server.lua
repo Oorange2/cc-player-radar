@@ -824,6 +824,8 @@ local function handle(cid, msg)
         sb.balance = sb.balance + sellerGets
         addBankLog(l.seller,"Sold "..totalItems.."x "..dn.." +"..sellerGets.."sp")
         bankData.market_revenue = (bankData.market_revenue or 0) + tax
+        if not bankData.market_sales then bankData.market_sales = {} end
+        table.insert(bankData.market_sales, {ts=os.epoch("utc"), tax=tax})
         b.credit = math.min(900, b.credit + 1)
         l.stock = l.stock - qty
         if l.stock == 0 then l.out_of_stock_ts = os.epoch("utc") end
@@ -884,6 +886,17 @@ local function handle(cid, msg)
                 daily_dep_int = daily_dep_int + math.floor(b.balance * 0.02)
             end
         end
+        local now_ms = os.epoch("utc")
+        local cutoff = now_ms - 86400000
+        local mkt24  = 0
+        local pruned_sales = {}
+        for _, s in ipairs(bankData.market_sales or {}) do
+            if s.ts >= cutoff then
+                mkt24 = mkt24 + s.tax
+                table.insert(pruned_sales, s)
+            end
+        end
+        bankData.market_sales = pruned_sales
         rednet.send(cid, {
             ok=true, users=summary,
             total_dep      = tdep,
@@ -892,7 +905,7 @@ local function handle(cid, msg)
             bank_balance   = vspurs - tdep,
             daily_loan_int = daily_loan_int,
             daily_dep_int  = daily_dep_int,
-            market_revenue = bankData.market_revenue or 0,
+            market_revenue = mkt24,
         }, PROTOCOL)
     end
 end
