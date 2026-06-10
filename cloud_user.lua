@@ -1763,7 +1763,7 @@ local function adminMenu()
                 table.insert(lines, "Loans:      " .. (res.total_loans    or 0) .. " sp")
                 table.insert(lines, "Loan int/d: " .. (res.daily_loan_int or 0) .. " sp")
                 table.insert(lines, "Dep int/d:  " .. (res.daily_dep_int  or 0) .. " sp")
-                table.insert(lines, "Mkt profit: " .. (res.market_revenue or 0) .. " sp")
+                table.insert(lines, "Mkt 24h:    " .. (res.market_revenue or 0) .. " sp")
                 table.insert(lines, string.rep("-", W))
                 for _, u in ipairs(res.users or {}) do
                     local lstr = u.loan and (" L:"..u.loan.remaining) or ""
