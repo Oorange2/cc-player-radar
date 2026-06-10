@@ -597,28 +597,21 @@ local function handle(cid, msg)
         if amount > cap then
             rednet.send(cid, {ok=false, err="Bank cannot finance this loan right now"}, PROTOCOL) return
         end
-        if countSpurs(BANK_VAULT) < amount then
-            rednet.send(cid, {ok=false, err="Bank vault has insufficient reserves"}, PROTOCOL) return
-        end
-        if not acc.vault or not peripheral.isPresent(acc.vault) then
-            rednet.send(cid, {ok=false, err="No vault configured"}, PROTOCOL) return
-        end
-        local moved = moveSpurs(BANK_VAULT, acc.vault, amount)
-        if moved == 0 then rednet.send(cid, {ok=false, err="Transfer failed"}, PROTOCOL) return end
         local now = os.epoch("utc")
+        b.balance = b.balance + amount
         b.loan = {
-            amount    = moved,
-            remaining = moved,
+            amount    = amount,
+            remaining = amount,
             rate      = rate,
             taken_ts  = now,
             due_ts    = now + 5 * 86400000,
             int_ts    = now,
             penalized = false,
         }
-        addBankLog(uname, "Loan: " .. moved .. " sp @ " .. rate .. "%/day, due 5d")
+        addBankLog(uname, "Loan: " .. amount .. " sp @ " .. rate .. "%/day, due 5d")
         saveBank()
-        rednet.send(cid, {ok=true, amount=moved, rate=rate}, PROTOCOL)
-        print(uname .. " took loan: " .. moved .. " sp @ " .. rate .. "%/day")
+        rednet.send(cid, {ok=true, amount=amount, rate=rate}, PROTOCOL)
+        print(uname .. " took loan: " .. amount .. " sp @ " .. rate .. "%/day")
 
     elseif msg.type == "bank_pay_loan" then
         local acc    = accounts[uname]
