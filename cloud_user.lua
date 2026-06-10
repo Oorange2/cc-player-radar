@@ -1063,7 +1063,15 @@ local function marketBrowse()
     local message="" local msgTimer=0
     local LIST_TOP=2
     local function listBot() return H-3 end
-    local function listRows() return listBot()-LIST_TOP+1 end
+    local function listItems() return math.floor((listBot()-LIST_TOP+1)/2) end
+    -- Strip "namespace:" prefix and underscores for display
+    local function shortName(l)
+        local n = l.display_name or l.item_name
+        if not l.display_name then
+            n = (n:match(":(.+)$") or n):gsub("_"," ")
+        end
+        return n
+    end
     local function doFetch()
         local r=rpc({type="market_list",token=token},8)
         listings=(r and r.listings) or {}
@@ -1197,26 +1205,30 @@ local function marketBrowse()
             local hdr=" Market ["..#filtered.."]"
             term.write(hdr..string.rep(" ",math.max(0,W-#hdr-3)).."[X]")
         end
-        for row=1,listRows() do
-            local l=filtered[row+scroll]
-            local y=LIST_TOP+row-1
-            term.setCursorPos(1,y) term.setBackgroundColor(colors.black)
+        for i=1,listItems() do
+            local l=filtered[i+scroll]
+            local ya=LIST_TOP+(i-1)*2
+            local yb=ya+1
+            term.setCursorPos(1,ya) term.setBackgroundColor(colors.black) term.clearLine()
+            term.setCursorPos(1,yb) term.setBackgroundColor(colors.black) term.clearLine()
             if l then
                 local oos=(l.stock<=0)
-                term.setTextColor(oos and colors.gray or itemColor(l.item_name)) term.write(" ")
-                local info=" x"..l.lot_size.."@"..l.price.."sp"
-                local sc=oos and " OOS" or (" ["..l.stock.."]")
-                local nameW=W-1-#info-#sc
-                local name=" "..(l.display_name or l.item_name):sub(1,nameW-1)
+                local sc=oos and "OOS" or ("["..l.stock.."]")
+                local nameW=W-2-#sc-1
+                local name=shortName(l)
+                -- Row A: ■ name [stock]
+                term.setCursorPos(1,ya)
+                term.setTextColor(oos and colors.gray or itemColor(l.item_name)) term.write("■ ")
                 term.setTextColor(oos and colors.gray or colors.white)
-                term.write(name..string.rep(" ",math.max(0,nameW-#name))..info)
+                term.write(name:sub(1,nameW)..string.rep(" ",math.max(0,nameW-#name)).." ")
                 term.setTextColor(oos and colors.red or colors.lime) term.write(sc)
-            else
-                term.setBackgroundColor(colors.black) term.write(string.rep(" ",W))
+                -- Row B: lot + price
+                term.setCursorPos(1,yb)
+                term.setTextColor(colors.gray) term.write("  x"..l.lot_size.." · "..l.price.."sp")
             end
         end
         if scroll>0 then term.setCursorPos(W,LIST_TOP) term.setBackgroundColor(colors.gray) term.setTextColor(colors.white) term.write("^") end
-        if scroll+listRows()<#filtered then term.setCursorPos(W,listBot()) term.setBackgroundColor(colors.gray) term.setTextColor(colors.white) term.write("v") end
+        if scroll+listItems()<#filtered then term.setCursorPos(W,listBot()) term.setBackgroundColor(colors.gray) term.setTextColor(colors.white) term.write("v") end
         -- Button bar
         term.setCursorPos(1,H-2) term.setBackgroundColor(colors.black) term.clearLine()
         term.setBackgroundColor(colors.gray)  term.write(" / ")
@@ -1245,7 +1257,7 @@ local function marketBrowse()
             elseif ev=="mouse_click" then searchMode=false end
         else
             if ev=="mouse_scroll" then
-                scroll=math.max(0,math.min(scroll+p1,math.max(0,#filtered-listRows())))
+                scroll=math.max(0,math.min(scroll+p1,math.max(0,#filtered-listItems())))
             elseif ev=="key" then
                 if p1==keys.q then return
                 elseif p1==keys.r then doFetch() applyFilter() message="Refreshed" msgTimer=os.clock()+1
@@ -1259,7 +1271,7 @@ local function marketBrowse()
                     elseif mx>=17 and mx<=24 then return end
                 else
                     local row=my-LIST_TOP+1
-                    local idx=row+scroll
+                    local idx=math.ceil(row/2)+scroll  -- two rows per listing
                     local l=filtered[idx]
                     if l then
                         local bought=showDetail(l)
