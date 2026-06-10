@@ -806,10 +806,7 @@ local function bankLoans(info)
                             payAmt=amountPicker({title="Pay Loan",available=loan.remaining,hint="Total owed: "..loan.remaining.." sp"})
                         end
                         if payAmt then
-                            local srcOpts={{label="From Vault",icon=colors.cyan},{label="From Inventory",icon=colors.orange}}
-                            local s=clickMenu("Pay from?",srcOpts)
-                            local src2=(s==2) and "inventory" or "vault"
-                            local res=rpc({type="bank_pay_loan",token=token,amount=payAmt,source=src2},15)
+                            local res=rpc({type="bank_pay_loan",token=token,amount=payAmt},15)
                             term.setBackgroundColor(colors.black) term.clear()
                             term.setCursorPos(1,3)
                             if res and res.ok then
