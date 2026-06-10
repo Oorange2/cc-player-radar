@@ -1112,24 +1112,19 @@ local function marketBrowse()
             term.setCursorPos(2,6)
             if l.stock<=0 then term.setTextColor(colors.red) term.write("OUT OF STOCK")
             else term.setTextColor(colors.lime) term.write("Stock: "..l.stock.." lot(s)") end
-            -- Tax tier
-            term.setCursorPos(2,7) term.setTextColor(colors.orange)
-            if tax==0 then term.write("No fee (under 5 sp)")
-            elseif tax==1 then term.write("Flat 1 sp fee (5-20 sp)")
-            else term.write("5% fee: "..tax.." sp/lot") end
             -- Divider
-            term.setCursorPos(1,8) term.setBackgroundColor(colors.black) term.setTextColor(colors.gray)
+            term.setCursorPos(1,7) term.setBackgroundColor(colors.black) term.setTextColor(colors.gray)
             term.write(string.rep("-",W))
             -- Qty selector (only if in stock)
             if l.stock>0 then
-                term.setCursorPos(2,9) term.setTextColor(colors.white)
+                term.setCursorPos(2,8) term.setTextColor(colors.white)
                 term.write("Qty: ")
                 term.setTextColor(colors.yellow) term.write(qty.." lot(s)")
-                term.setCursorPos(2,10) term.setTextColor(colors.gray) term.write("  scroll to change")
+                term.setCursorPos(2,9) term.setTextColor(colors.gray) term.write("  scroll to change")
                 -- Summary
-                term.setCursorPos(2,11) term.setTextColor(colors.white)
+                term.setCursorPos(2,10) term.setTextColor(colors.white)
                 term.write(("Total: "..totalPrice.." sp"):sub(1,W-2))
-                term.setCursorPos(2,12)
+                term.setCursorPos(2,11)
                 if bal>=totalPrice then
                     term.setTextColor(colors.lime)
                     term.write(("After: "..(bal-totalPrice).." sp"):sub(1,W-2))
@@ -1308,9 +1303,9 @@ local function marketAddListing()
     term.setCursorPos(2,6) term.setTextColor(colors.cyan) term.write("Starts with 0 stock")
     term.setCursorPos(2,7) term.setTextColor(colors.gray) term.write("Add stock in My Listings")
     term.setCursorPos(2,9) term.setTextColor(colors.orange)
-    if tax==0 then term.write("No fee per sale (<5 sp)")
-    elseif tax==1 then term.write("Flat 1 sp fee/sale (5-20 sp)")
-    else term.write("Fee: "..tax.." sp/sale (5%)") end
+    if tax==0 then term.write("No fee per lot sold (<5 sp)")
+    elseif tax==1 then term.write("5% fee: 1 sp deducted per lot sold")
+    else term.write("5% fee: "..tax.." sp deducted per lot sold") end
     term.setCursorPos(1,H-1) term.setBackgroundColor(colors.black) term.clearLine()
     term.setBackgroundColor(colors.white) term.setTextColor(colors.black) term.write(" Create ")
     term.setBackgroundColor(colors.black) term.write("  ")
@@ -1460,7 +1455,7 @@ local function marketMenu()
         {label="Back",          icon=colors.gray  },
     }
     while true do
-        local sel=clickMenu("Market",menuItems,"5% tax deducted from seller on each sale")
+        local sel=clickMenu("Market",menuItems)
         if sel==nil or sel==4 then return
         elseif sel==1 then marketBrowse()
         elseif sel==2 then marketAddListing()
