@@ -1656,11 +1656,13 @@ local function createCoinflip()
 end
 
 local function openCoinflips()
-    local flips={} local scroll=0 local needFetch=true
+    local flips={} local scroll=0 local needFetch=true local bal=0
     while true do
         if needFetch then
             local r=rpc({type="coinflip_list",token=token},8)
             flips=(r and r.flips) or {}
+            local bi=rpc({type="bank_info",token=token},5)
+            bal=(bi and bi.balance) or 0
             scroll=0 needFetch=false
         end
         W,H=term.getSize()
@@ -1677,8 +1679,11 @@ local function openCoinflips()
                 local prize2=pot2-math.max(1,math.floor(pot2*0.10))
                 local prizeStr=" ~"..prize2.."sp"
                 local left="#"..f.id.." "..f.wager.."sp by "..f.creator
-                term.setTextColor(colors.yellow) term.write(left:sub(1,W-#prizeStr-1))
-                term.setTextColor(colors.lime)   term.write(string.rep(" ",math.max(1,W-#left-#prizeStr))..prizeStr)
+                local canAfford = f.wager <= bal
+                term.setTextColor(canAfford and colors.yellow or colors.gray)
+                term.write(left:sub(1,W-#prizeStr-1))
+                term.setTextColor(canAfford and colors.lime or colors.gray)
+                term.write(string.rep(" ",math.max(1,W-#left-#prizeStr))..prizeStr)
             else term.write(string.rep(" ",W)) end
         end
         if scroll>0 then term.setCursorPos(W,2) term.setBackgroundColor(colors.gray) term.setTextColor(colors.white) term.write("^") end
@@ -1696,6 +1701,13 @@ local function openCoinflips()
             local idx=my-1+scroll
             local f=flips[idx]
             if f then
+                if f.wager > bal then
+                    -- flash a brief "can't afford" message in the footer
+                    term.setCursorPos(1,H) term.setBackgroundColor(colors.black)
+                    term.setTextColor(colors.red)
+                    term.write(("Need "..f.wager.."sp, you have "..bal.."sp"):sub(1,W))
+                    sleep(1.5)
+                else
                 local pot2=f.wager*2
                 local houseCut2=math.max(1,math.floor(pot2*0.10))
                 local prize2=pot2-houseCut2
@@ -1773,6 +1785,7 @@ local function openCoinflips()
                     term.setCursorPos(2,H-1) term.setTextColor(colors.gray) term.write("Press any key...")
                     os.pullEvent() needFetch=true
                 end
+                end -- canAfford
             end
         elseif ev=="mouse_scroll" then
             scroll=math.max(0,math.min(scroll+p1,math.max(0,#flips-listH)))
