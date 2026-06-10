@@ -1062,6 +1062,9 @@ local function marketBrowse()
     local searchMode=false local searchQuery=""
     local message="" local msgTimer=0
     local LIST_TOP=2
+    local shimmerPhase = 0
+    local shimmerTimer = os.startTimer(0.4)
+    local SHIMMER_COLS = {colors.yellow, colors.orange, colors.white, colors.orange}
     local function listBot() return H-3 end
     local function listItems() return math.floor((listBot()-LIST_TOP+1)/2) end
     -- Strip "namespace:" prefix and underscores for display
@@ -1222,7 +1225,12 @@ local function marketBrowse()
                 term.setBackgroundColor(oos and colors.gray or itemColor(l.item_name))
                 term.write(" ")  -- background-colored square, guaranteed 1 col
                 term.setBackgroundColor(colors.black) term.write(" ")
-                term.setTextColor(oos and colors.gray or colors.white)
+                local isBoosted = l.boost_ts and l.boost_ts > os.epoch("utc")
+                if isBoosted and not oos then
+                    term.setTextColor(SHIMMER_COLS[shimmerPhase + 1])
+                else
+                    term.setTextColor(oos and colors.gray or colors.white)
+                end
                 term.write(name:sub(1,nameW)..string.rep(" ",math.max(0,nameW-#name)).." ")
                 term.setTextColor(oos and colors.red or colors.lime) term.write(sc)
                 -- Row B: lot + price
@@ -1250,6 +1258,9 @@ local function marketBrowse()
         term.setCursorPos(1,H) term.setBackgroundColor(colors.black) term.write(string.rep(" ",W))
         local ev,p1,p2,p3=os.pullEvent()
         if ev=="term_resize" then W,H=term.getSize()
+        elseif ev=="timer" and p1==shimmerTimer then
+            shimmerPhase = (shimmerPhase + 1) % #SHIMMER_COLS
+            shimmerTimer = os.startTimer(0.4)
         elseif searchMode then
             if ev=="char" then searchQuery=searchQuery..p1 applyFilter()
             elseif ev=="key" then
@@ -1398,13 +1409,19 @@ local function marketMyListings()
             local idx=my-1+scroll
             local l=listings[idx]
             if l then
+                local now_ts = os.epoch("utc")
+                local boostDays = (l.boost_ts and l.boost_ts > now_ts) and math.ceil((l.boost_ts - now_ts) / 86400000) or nil
+                local boostLabel = boostDays and ("Boosted ("..boostDays.."d left)") or "Boost (10sp/day)"
                 local opts={
                     {label="Add Stock",     icon=colors.green},
+                    {label="Edit Listing",  icon=colors.cyan},
+                    {label=boostLabel,      icon=boostDays and colors.yellow or colors.orange},
                     {label="Cancel Listing",icon=colors.red},
                     {label="Back",          icon=colors.gray},
                 }
                 local sub=clickMenu("Manage: "..(l.display_name or l.item_name):sub(1,W-10),opts)
                 if sub==1 then
+                    -- Add stock
                     local srcOpts={{label="From Inventory",icon=colors.orange},{label="From Vault",icon=colors.cyan},{label="Back",icon=colors.gray}}
                     local s=clickMenu("Add Stock - Source",srcOpts)
                     if s and s~=3 then
@@ -1442,6 +1459,94 @@ local function marketMyListings()
                         end
                     end
                 elseif sub==2 then
+                    -- Edit listing (price or lot size)
+                    local canEditLot = (l.stock == 0)
+                    local lotLbl = canEditLot and ("Lot Size (now "..l.lot_size..")") or ("Lot Size (need 0 stock)")
+                    local eOpts={
+                        {label="Price (now "..l.price.."sp)", icon=colors.yellow},
+                        {label=lotLbl,                        icon=canEditLot and colors.cyan or colors.gray},
+                        {label="Back",                        icon=colors.gray},
+                    }
+                    local esub=clickMenu("Edit: "..(l.display_name or l.item_name):sub(1,W-8),eOpts)
+                    if esub==1 then
+                        local np=numInput("New Price","Current: "..l.price.."sp per lot",0)
+                        if np~=nil then
+                            local r=rpc({type="market_edit_listing",token=token,listing_id=l.id,price=np},10)
+                            term.setBackgroundColor(colors.black) term.clear()
+                            term.setCursorPos(1,3)
+                            if r and r.ok then term.setTextColor(colors.lime) term.write("Price set to "..r.price.."sp")
+                            else term.setTextColor(colors.red) term.write((r and r.err) or "Failed") end
+                            term.setCursorPos(1,5) term.setTextColor(colors.gray) term.write("Press any key...")
+                            os.pullEvent() needFetch=true
+                        end
+                    elseif esub==2 and canEditLot then
+                        local nl=numInput("New Lot Size","Current: "..l.lot_size.." item(s) per sale",1)
+                        if nl~=nil then
+                            local r=rpc({type="market_edit_listing",token=token,listing_id=l.id,lot_size=nl},10)
+                            term.setBackgroundColor(colors.black) term.clear()
+                            term.setCursorPos(1,3)
+                            if r and r.ok then term.setTextColor(colors.lime) term.write("Lot size set to "..r.lot_size)
+                            else term.setTextColor(colors.red) term.write((r and r.err) or "Failed") end
+                            term.setCursorPos(1,5) term.setTextColor(colors.gray) term.write("Press any key...")
+                            os.pullEvent() needFetch=true
+                        end
+                    end
+                elseif sub==3 then
+                    -- Boost listing
+                    local days=amountPicker({
+                        title="Boost Listing",
+                        headerColor=colors.yellow,
+                        unit="day(s)",
+                        available=30,
+                        availableLabel="Max: 30 days",
+                        hint="10 sp/day from bank balance",
+                    })
+                    if days then
+                        local cost=days*10
+                        W,H=term.getSize()
+                        term.setBackgroundColor(colors.black) term.clear()
+                        term.setBackgroundColor(colors.yellow) term.setTextColor(colors.black)
+                        term.setCursorPos(1,1) term.clearLine() term.write(" Boost Listing")
+                        term.setBackgroundColor(colors.black)
+                        term.setCursorPos(2,3) term.setTextColor(colors.white)
+                        term.write(("Item: "..(l.display_name or l.item_name)):sub(1,W-2))
+                        term.setCursorPos(2,5) term.setTextColor(colors.yellow) term.write(days.." day(s)  =  "..cost.." sp")
+                        term.setCursorPos(2,6) term.setTextColor(colors.gray) term.write("Deducted from bank balance")
+                        term.setCursorPos(2,8) term.setTextColor(colors.cyan) term.write("Goes to top of market tab")
+                        term.setCursorPos(2,9) term.setTextColor(colors.yellow) term.write("Name shimmers gold while active")
+                        term.setCursorPos(1,H-1) term.setBackgroundColor(colors.black) term.clearLine()
+                        term.setBackgroundColor(colors.white) term.setTextColor(colors.black) term.write(" Confirm ")
+                        term.setBackgroundColor(colors.black) term.write("  ")
+                        term.setBackgroundColor(colors.red) term.setTextColor(colors.white) term.write(" Cancel ")
+                        term.setCursorPos(1,H) term.setBackgroundColor(colors.black) term.write(string.rep(" ",W))
+                        local confirmed=false
+                        while true do
+                            local bev,bp1,bp2,bp3=os.pullEvent()
+                            if bev=="mouse_click" then
+                                if bp3==1 and bp2>=W-2 then break end
+                                if bp3==H-1 then
+                                    if bp2>=1 and bp2<=9 then confirmed=true break
+                                    elseif bp2>=12 then break end
+                                end
+                            elseif bev=="key" and bp1==keys.q then break end
+                        end
+                        if confirmed then
+                            local r=rpc({type="market_boost_listing",token=token,listing_id=l.id,days=days},10)
+                            term.setBackgroundColor(colors.black) term.clear()
+                            term.setCursorPos(1,3)
+                            if r and r.ok then
+                                term.setTextColor(colors.yellow) term.write("Listing boosted!")
+                                term.setCursorPos(1,4) term.setTextColor(colors.lime) term.write(r.days_total.." day(s) boost active")
+                                term.setCursorPos(1,5) term.setTextColor(colors.orange) term.write("Cost: "..cost.." sp deducted")
+                            else
+                                term.setTextColor(colors.red) term.write((r and r.err) or "Failed")
+                            end
+                            term.setCursorPos(1,7) term.setTextColor(colors.gray) term.write("Press any key...")
+                            os.pullEvent() needFetch=true
+                        end
+                    end
+                elseif sub==4 then
+                    -- Cancel listing
                     local r=rpc({type="market_cancel",token=token,listing_id=l.id},15)
                     term.setBackgroundColor(colors.black) term.clear()
                     term.setCursorPos(1,3)
