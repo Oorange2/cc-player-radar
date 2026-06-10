@@ -1214,11 +1214,14 @@ local function marketBrowse()
             if l then
                 local oos=(l.stock<=0)
                 local sc=oos and "OOS" or ("["..l.stock.."]")
-                local nameW=W-2-#sc-1
+                -- Reserve W-1 cols for content, col W free for scroll arrows
+                local nameW=math.max(1, W-4-#sc)
                 local name=shortName(l)
-                -- Row A: ■ name [stock]
+                -- Row A: colored dot + name + [stock]
                 term.setCursorPos(1,ya)
-                term.setTextColor(oos and colors.gray or itemColor(l.item_name)) term.write("■ ")
+                term.setBackgroundColor(oos and colors.gray or itemColor(l.item_name))
+                term.write(" ")  -- background-colored square, guaranteed 1 col
+                term.setBackgroundColor(colors.black) term.write(" ")
                 term.setTextColor(oos and colors.gray or colors.white)
                 term.write(name:sub(1,nameW)..string.rep(" ",math.max(0,nameW-#name)).." ")
                 term.setTextColor(oos and colors.red or colors.lime) term.write(sc)
