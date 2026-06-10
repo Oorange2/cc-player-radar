@@ -37,12 +37,23 @@ local function itemColor(name)
     return iconColors[h + 1]
 end
 
+local rpcSeq = 0
 local function rpc(msg, timeout)
+    rpcSeq = rpcSeq + 1
+    msg._seq = rpcSeq
+    local mySeq = rpcSeq
     if serverId then rednet.send(serverId, msg, PROTOCOL)
     else rednet.broadcast(msg, PROTOCOL) end
-    local id, res = rednet.receive(PROTOCOL, timeout or 5)
-    if id then serverId = id end
-    return res
+    local deadline = os.clock() + (timeout or 5)
+    while true do
+        local remaining = deadline - os.clock()
+        if remaining <= 0 then return nil end
+        local id, res = rednet.receive(PROTOCOL, remaining)
+        if not res then return nil end
+        if id then serverId = id end
+        if type(res) == "table" and res._seq == mySeq then return res end
+        -- stale response from a prior timed-out call — discard and keep waiting
+    end
 end
 
 -- Login
@@ -1827,19 +1838,32 @@ local function myBets()
     end
 end
 
-local function gamblingMenu()
+local function coinflipMenu()
     local menuItems={
-        {label="Create Coinflip",icon=colors.green },
         {label="Open Coinflips", icon=colors.cyan  },
+        {label="Create Coinflip",icon=colors.green },
         {label="My Active Bets", icon=colors.yellow},
         {label="Back",           icon=colors.gray  },
     }
     while true do
-        local sel=clickMenu("Gambling",menuItems)
+        local sel=clickMenu("Coinflip",menuItems)
         if sel==nil or sel==4 then return
-        elseif sel==1 then createCoinflip()
-        elseif sel==2 then openCoinflips()
+        elseif sel==1 then openCoinflips()
+        elseif sel==2 then createCoinflip()
         elseif sel==3 then myBets()
+        end
+    end
+end
+
+local function gamblingMenu()
+    local menuItems={
+        {label="Coinflip", icon=colors.pink},
+        {label="Back",     icon=colors.gray},
+    }
+    while true do
+        local sel=clickMenu("Gambling",menuItems)
+        if sel==nil or sel==2 then return
+        elseif sel==1 then coinflipMenu()
         end
     end
 end
@@ -1977,10 +2001,9 @@ end
 
 -- User menu
 local function userMenu()
-    -- unreadNotifs is set at login — no extra RPC needed here
-    local unreadCount = unreadNotifs
-
     while true do
+        local ncRes = rpc({type="get_notif_count", token=token}, 5)
+        local unreadCount = (ncRes and ncRes.count) or unreadNotifs
         local hasUnread = unreadCount > 0
         local notifLabel = hasUnread and ("Notifications ("..unreadCount..")") or "Notifications"
         local menuItems={
