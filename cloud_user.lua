@@ -1838,6 +1838,114 @@ local function myBets()
     end
 end
 
+local function slotsGame()
+    local SYMS = {
+        {label=" LEM  ", color=colors.yellow  },  -- 1 loss
+        {label=" GRP  ", color=colors.purple  },  -- 2 loss
+        {label=" ORG  ", color=colors.orange  },  -- 3 loss
+        {label=" CHR  ", color=colors.red     },  -- 4 win 2x
+        {label=" BAR  ", color=colors.lightBlue}, -- 5 win 5x
+        {label="  7   ", color=colors.cyan    },  -- 6 win 10x jackpot
+    }
+    local bi = rpc({type="bank_info",token=token},5)
+    local bal = (bi and bi.balance) or 0
+    local wager = math.max(1, math.min(10, bal))
+    local reels = {1,2,3}
+    local lastMsg, lastColor = nil, colors.white
+
+    local function drawReels(r)
+        local xs = {3,11,19}
+        for i=1,3 do
+            local sym=SYMS[r[i]]
+            for row=6,8 do
+                term.setCursorPos(xs[i],row)
+                term.setBackgroundColor(sym.color) term.setTextColor(colors.black)
+                if row==7 then term.write(sym.label) else term.write("      ") end
+            end
+        end
+        term.setBackgroundColor(colors.black)
+    end
+
+    local function animateSpin(final)
+        for _=1,15 do
+            reels[1]=math.random(6) reels[2]=math.random(6) reels[3]=math.random(6)
+            drawReels(reels) sleep(0.05)
+        end
+        reels[1]=final[1] drawReels(reels) sleep(0.1)
+        for _=1,8 do reels[2]=math.random(6) reels[3]=math.random(6) drawReels(reels) sleep(0.07) end
+        reels[2]=final[2] drawReels(reels) sleep(0.1)
+        for _=1,6 do reels[3]=math.random(6) drawReels(reels) sleep(0.09) end
+        reels[3]=final[3] drawReels(reels) sleep(0.3)
+    end
+
+    local function draw()
+        W,H=term.getSize()
+        term.setBackgroundColor(colors.black) term.clear()
+        term.setBackgroundColor(colors.pink) term.setTextColor(colors.white)
+        term.setCursorPos(1,1) term.clearLine()
+        term.write(" SLOTS"..string.rep(" ",W-9).."[X]")
+        term.setBackgroundColor(colors.black)
+        term.setCursorPos(2,2) term.setTextColor(colors.gray) term.write("Bal: ")
+        term.setTextColor(colors.yellow) term.write(bal.."sp")
+        term.setCursorPos(2,4) term.setTextColor(colors.gray) term.write("Bet: ")
+        term.setTextColor(colors.white) term.write(wager.."sp")
+        term.setCursorPos(16,4) term.setBackgroundColor(colors.gray) term.setTextColor(colors.white) term.write(" -1 ")
+        term.setCursorPos(21,4) term.write(" +1 ")
+        term.setBackgroundColor(colors.black)
+        drawReels(reels)
+        if lastMsg then
+            term.setCursorPos(math.max(1,math.floor((W-#lastMsg)/2)+1),10)
+            term.setTextColor(lastColor) term.write(lastMsg)
+        end
+        term.setCursorPos(2,12) term.setBackgroundColor(colors.green) term.setTextColor(colors.white)
+        term.write(string.rep(" ",W-3))
+        term.setCursorPos(math.floor((W-4)/2)+1,12) term.write("SPIN")
+        term.setBackgroundColor(colors.black)
+        term.setCursorPos(2,14) term.setTextColor(colors.gray) term.write("2x:20%  5x:2%  10x:0.5%")
+        term.setCursorPos(2,H) term.setBackgroundColor(colors.gray) term.setTextColor(colors.white) term.write(" Back ")
+        term.setBackgroundColor(colors.black)
+    end
+
+    while true do
+        draw()
+        local ev,p1,p2,p3=os.pullEvent()
+        if ev=="mouse_click" then
+            local mx,my=p2,p3
+            if my==1 and mx>=W-2 then return end
+            if my==H and mx>=2 and mx<=7 then return end
+            if my==4 and mx>=16 and mx<=19 then wager=math.max(1,wager-1) lastMsg=nil end
+            if my==4 and mx>=21 and mx<=24 then wager=math.min(bal,wager+1) lastMsg=nil end
+            if my==12 then
+                if bal<wager then lastMsg="Not enough balance!" lastColor=colors.red
+                else
+                    local r=rpc({type="slots_spin",token=token,wager=wager},8)
+                    if not r or not r.ok then
+                        lastMsg=(r and r.err) or "Server error" lastColor=colors.red
+                    else
+                        local final
+                        if     r.outcome=="jackpot" then final={6,6,6}
+                        elseif r.outcome=="bigwin"  then final={5,5,5}
+                        elseif r.outcome=="win"     then final={4,4,4}
+                        else
+                            local l1=math.random(3); local l2
+                            repeat l2=math.random(3) until l2~=l1
+                            final={l1, l2, math.random(3)}
+                        end
+                        animateSpin(final)
+                        bal=r.balance
+                        if     r.outcome=="loss"    then lastMsg="No match. -"..r.wager.."sp"         lastColor=colors.red
+                        elseif r.outcome=="win"     then lastMsg="MATCH! 2x +"..r.prize-r.wager.."sp" lastColor=colors.lime
+                        elseif r.outcome=="bigwin"  then lastMsg="BIG WIN! 5x +"..r.prize-r.wager.."sp" lastColor=colors.yellow
+                        elseif r.outcome=="jackpot" then lastMsg="JACKPOT!! 10x +"..r.prize-r.wager.."sp" lastColor=colors.cyan
+                        end
+                    end
+                end
+            end
+        elseif ev=="mouse_scroll" then wager=math.max(1,math.min(bal,wager-p1)) lastMsg=nil
+        elseif ev=="key" and p1==keys.q then return end
+    end
+end
+
 local function coinflipMenu()
     local menuItems={
         {label="Open Coinflips", icon=colors.cyan  },
@@ -1857,13 +1965,15 @@ end
 
 local function gamblingMenu()
     local menuItems={
-        {label="Coinflip", icon=colors.pink},
-        {label="Back",     icon=colors.gray},
+        {label="Coinflip", icon=colors.pink  },
+        {label="Slots",    icon=colors.yellow},
+        {label="Back",     icon=colors.gray  },
     }
     while true do
         local sel=clickMenu("Gambling",menuItems)
-        if sel==nil or sel==2 then return
+        if sel==nil or sel==3 then return
         elseif sel==1 then coinflipMenu()
+        elseif sel==2 then slotsGame()
         end
     end
 end
