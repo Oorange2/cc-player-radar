@@ -326,11 +326,15 @@ local function logScreen()
 end
 
 -- Shared clickable menu helper
+-- items may include flash=true to pulse the row's icon color
 local function clickMenu(title, items, msg)
-    -- items = { {label, icon} }
-    -- returns selected index, or nil if closed
     local message = msg or ""
     local msgTimer = 0
+    local flashOn = true
+    local flashTimer = nil
+    for _, opt in ipairs(items) do
+        if opt.flash then flashTimer = os.startTimer(0.5) break end
+    end
     while true do
         W, H = term.getSize()
         term.setBackgroundColor(colors.black) term.clear()
@@ -341,8 +345,11 @@ local function clickMenu(title, items, msg)
         term.write(hdr .. string.rep(" ", math.max(0, W - #hdr - 3)) .. "[X]")
         for i, opt in ipairs(items) do
             term.setCursorPos(1, i + 2)
-            term.setBackgroundColor(opt.icon or colors.gray) term.setTextColor(colors.black) term.write(" ")
-            term.setBackgroundColor(colors.black) term.setTextColor(colors.white)
+            local lit = opt.flash and flashOn
+            term.setBackgroundColor(lit and colors.red or (opt.icon or colors.gray))
+            term.setTextColor(colors.black) term.write(" ")
+            term.setBackgroundColor(colors.black)
+            term.setTextColor(lit and colors.red or colors.white)
             term.write(" " .. opt.label .. string.rep(" ", math.max(0, W - #opt.label - 2)))
         end
         term.setCursorPos(1, H) term.setBackgroundColor(colors.black)
@@ -354,6 +361,9 @@ local function clickMenu(title, items, msg)
         end
         local ev, p1, p2, p3 = os.pullEvent()
         if ev == "term_resize" then W, H = term.getSize() shiftHeld = false
+        elseif ev == "timer" and p1 == flashTimer then
+            flashOn = not flashOn
+            flashTimer = os.startTimer(0.5)
         elseif ev == "mouse_click" then
             local mx, my = p2, p3
             if my == 1 and mx >= W - 2 then return nil end
@@ -1876,22 +1886,116 @@ local function cloudStorageMenu()
     end
 end
 
+-- ── Notifications UI ─────────────────────────────────────────────────────────
+
+local function notificationsScreen()
+    local res = rpc({type="get_notifications", token=token}, 8)
+    local notifs = (res and res.notifications) or {}
+    local scroll = 0
+
+    local function wordWrap(text, width)
+        local lines = {}
+        local line = ""
+        for word in (text.." "):gmatch("(%S+)%s+") do
+            if #line == 0 then
+                line = word
+            elseif #line + 1 + #word <= width then
+                line = line .. " " .. word
+            else
+                table.insert(lines, line)
+                line = "  " .. word  -- indent continuation
+            end
+        end
+        if #line > 0 then table.insert(lines, line) end
+        if #lines == 0 then table.insert(lines, "") end
+        return lines
+    end
+
+    local function buildLines()
+        local out = {}
+        -- newest first
+        for i = #notifs, 1, -1 do
+            local n = notifs[i]
+            local wrapped = wordWrap(n.msg, W - 1)
+            for j, ln in ipairs(wrapped) do
+                table.insert(out, { text=ln, color=j==1 and colors.white or colors.lightGray })
+            end
+            table.insert(out, { text="", color=colors.black })  -- spacer
+        end
+        if #out == 0 then
+            table.insert(out, { text=" No notifications yet.", color=colors.gray })
+        end
+        return out
+    end
+
+    while true do
+        W, H = term.getSize()
+        local listH = H - 3
+        local lines = buildLines()
+        term.setBackgroundColor(colors.black) term.clear()
+        term.setBackgroundColor(colors.purple) term.setTextColor(colors.white)
+        term.setCursorPos(1,1) term.clearLine()
+        local hdr = " Notifications ["..#notifs.."]"
+        term.write(hdr..string.rep(" ",math.max(0,W-#hdr-3)).."[X]")
+        for row = 1, listH do
+            local ln = lines[row + scroll]
+            term.setCursorPos(1, row+1) term.setBackgroundColor(colors.black)
+            if ln then
+                term.setTextColor(ln.color)
+                term.write(ln.text..string.rep(" ", math.max(0, W-#ln.text)))
+            else
+                term.setTextColor(colors.black) term.write(string.rep(" ",W))
+            end
+        end
+        if scroll > 0 then
+            term.setCursorPos(W,2) term.setBackgroundColor(colors.gray) term.setTextColor(colors.white) term.write("^")
+        end
+        if scroll + listH < #lines then
+            term.setCursorPos(W,H-1) term.setBackgroundColor(colors.gray) term.setTextColor(colors.white) term.write("v")
+        end
+        term.setCursorPos(1,H-1) term.setBackgroundColor(colors.black) term.clearLine()
+        term.setBackgroundColor(colors.orange) term.setTextColor(colors.white) term.write(" < Back ")
+        term.setBackgroundColor(colors.black) term.setTextColor(colors.gray) term.write("  Q=back")
+        term.setCursorPos(1,H) term.setBackgroundColor(colors.black) term.write(string.rep(" ",W))
+        local ev,p1,p2,p3 = os.pullEvent()
+        if ev=="term_resize" then W,H=term.getSize()
+        elseif ev=="mouse_click" then
+            local mx,my=p2,p3
+            if (my==1 and mx>=W-2) or (my==H-1 and mx<=8) then return end
+        elseif ev=="mouse_scroll" then
+            scroll = math.max(0, math.min(scroll+p1, math.max(0, #lines-listH)))
+        elseif ev=="key" then
+            if p1==keys.q then return end
+        end
+    end
+end
+
 -- User menu
 local function userMenu()
-    local menuItems={
-        {label="Cloud Storage", icon=colors.cyan  },
-        {label="Bank",          icon=colors.yellow},
-        {label="Market",        icon=colors.orange},
-        {label="Gambling",      icon=colors.pink  },
-        {label="Logout",        icon=colors.red   },
-    }
+    -- Fetch unread count once on login so the notification tab can flash
+    local ncRes = rpc({type="get_notif_count", token=token}, 3)
+    local unreadCount = (ncRes and ncRes.count) or 0
+
     while true do
+        local hasUnread = unreadCount > 0
+        local notifLabel = hasUnread and ("Notifications ("..unreadCount..")") or "Notifications"
+        local menuItems={
+            {label="Cloud Storage", icon=colors.cyan  },
+            {label="Bank",          icon=colors.yellow},
+            {label="Market",        icon=colors.orange},
+            {label="Gambling",      icon=colors.pink  },
+            {label=notifLabel,      icon=colors.purple, flash=hasUnread},
+            {label="Logout",        icon=colors.red   },
+        }
         local sel=clickMenu("Cloud - "..username, menuItems)
-        if sel==nil or sel==5 then token=nil username=nil isAdmin=false return
+        if sel==nil or sel==6 then token=nil username=nil isAdmin=false return
         elseif sel==1 then cloudStorageMenu()
         elseif sel==2 then bankMenu()
         elseif sel==3 then marketMenu()
         elseif sel==4 then gamblingMenu()
+        elseif sel==5 then
+            notificationsScreen()
+            unreadCount = 0  -- all read now
         end
     end
 end
