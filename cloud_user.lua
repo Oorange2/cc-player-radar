@@ -1289,6 +1289,7 @@ local function marketBrowse()
                     local l=filtered[idx]
                     if l then
                         local bought=showDetail(l)
+                        shimmerTimer = os.startTimer(0.4)  -- restart after sub-screen consumed the old timer
                         if bought then doFetch() applyFilter() end
                     end
                 end
@@ -1566,6 +1567,268 @@ local function marketMyListings()
     end
 end
 
+-- ── Gambling UI ──────────────────────────────────────────────────────────────
+
+local function createCoinflip()
+    local bi=rpc({type="bank_info",token=token},5)
+    local bal=(bi and bi.balance) or 0
+    if bal<=0 then
+        term.setBackgroundColor(colors.black) term.clear()
+        term.setCursorPos(1,3) term.setTextColor(colors.red) term.write("No bank balance!")
+        term.setCursorPos(1,5) term.setTextColor(colors.gray) term.write("Press any key...")
+        os.pullEvent() return
+    end
+    local wager=amountPicker({
+        title="Create Coinflip",
+        headerColor=colors.pink,
+        unit="sp",
+        available=bal,
+        hint="Winner gets ~90% of the pot",
+    })
+    if not wager then return end
+    local pot=wager*2
+    local houseCut=math.max(1,math.floor(pot*0.10))
+    local prize=pot-houseCut
+    W,H=term.getSize()
+    term.setBackgroundColor(colors.black) term.clear()
+    term.setBackgroundColor(colors.pink) term.setTextColor(colors.black)
+    term.setCursorPos(1,1) term.clearLine() term.write(" Create Coinflip")
+    term.setBackgroundColor(colors.black)
+    term.setCursorPos(2,3) term.setTextColor(colors.white) term.write("Wager: "..wager.." sp each")
+    term.setCursorPos(2,4) term.setTextColor(colors.gray)  term.write("Pot:   "..pot.." sp if joined")
+    term.setCursorPos(2,5) term.setTextColor(colors.lime)  term.write("Prize: ~"..prize.." sp if you win")
+    term.setCursorPos(2,6) term.setTextColor(colors.orange)term.write("House: "..houseCut.." sp (10% cut)")
+    term.setCursorPos(2,8) term.setTextColor(colors.cyan)  term.write("Wager deducted now.")
+    term.setCursorPos(2,9) term.setTextColor(colors.cyan)  term.write("Cancel anytime if nobody joins.")
+    term.setCursorPos(1,H-1) term.setBackgroundColor(colors.black) term.clearLine()
+    term.setBackgroundColor(colors.white) term.setTextColor(colors.black) term.write(" Create ")
+    term.setBackgroundColor(colors.black) term.write("  ")
+    term.setBackgroundColor(colors.red) term.setTextColor(colors.white) term.write(" Cancel ")
+    term.setCursorPos(1,H) term.setBackgroundColor(colors.black) term.write(string.rep(" ",W))
+    while true do
+        local ev,p1,p2,p3=os.pullEvent()
+        if ev=="mouse_click" then
+            if p3==1 and p2>=W-2 then return end
+            if p3==H-1 then
+                if p2>=1 and p2<=8 then
+                    local r=rpc({type="coinflip_create",token=token,wager=wager},10)
+                    term.setBackgroundColor(colors.black) term.clear()
+                    term.setCursorPos(1,3)
+                    if r and r.ok then
+                        term.setTextColor(colors.lime) term.write("Coinflip #"..r.id.." created!")
+                        term.setCursorPos(1,4) term.setTextColor(colors.gray) term.write("Wager: "..r.wager.." sp deducted")
+                        term.setCursorPos(1,5) term.setTextColor(colors.cyan) term.write("Waiting for someone to join...")
+                    else
+                        term.setTextColor(colors.red) term.write((r and r.err) or "Failed")
+                    end
+                    term.setCursorPos(1,7) term.setTextColor(colors.gray) term.write("Press any key...")
+                    os.pullEvent() return
+                elseif p2>=11 then return end
+            end
+        elseif ev=="key" and p1==keys.q then return end
+    end
+end
+
+local function openCoinflips()
+    local flips={} local scroll=0 local needFetch=true
+    while true do
+        if needFetch then
+            local r=rpc({type="coinflip_list",token=token},8)
+            flips=(r and r.flips) or {}
+            scroll=0 needFetch=false
+        end
+        W,H=term.getSize()
+        local listH=H-3
+        term.setBackgroundColor(colors.black) term.clear()
+        term.setBackgroundColor(colors.pink) term.setTextColor(colors.black)
+        term.setCursorPos(1,1) term.clearLine()
+        term.write(" Open Coinflips ["..#flips.."]"..string.rep(" ",math.max(0,W-20)).."[X]")
+        for row=1,listH do
+            local f=flips[row+scroll]
+            term.setCursorPos(1,row+1) term.setBackgroundColor(colors.black)
+            if f then
+                local pot2=f.wager*2
+                local prize2=pot2-math.max(1,math.floor(pot2*0.10))
+                local prizeStr=" ~"..prize2.."sp"
+                local left="#"..f.id.." "..f.wager.."sp by "..f.creator
+                term.setTextColor(colors.yellow) term.write(left:sub(1,W-#prizeStr-1))
+                term.setTextColor(colors.lime)   term.write(string.rep(" ",math.max(1,W-#left-#prizeStr))..prizeStr)
+            else term.write(string.rep(" ",W)) end
+        end
+        if scroll>0 then term.setCursorPos(W,2) term.setBackgroundColor(colors.gray) term.setTextColor(colors.white) term.write("^") end
+        if scroll+listH<#flips then term.setCursorPos(W,H-1) term.setBackgroundColor(colors.gray) term.setTextColor(colors.white) term.write("v") end
+        term.setCursorPos(1,H-1) term.setBackgroundColor(colors.black) term.clearLine()
+        term.setBackgroundColor(colors.orange) term.write(" < Back ")
+        term.setBackgroundColor(colors.black) term.setTextColor(colors.gray) term.write("  R=refresh  Click to join")
+        term.setCursorPos(1,H) term.setBackgroundColor(colors.black) term.write(string.rep(" ",W))
+        local ev,p1,p2,p3=os.pullEvent()
+        if ev=="term_resize" then W,H=term.getSize()
+        elseif ev=="mouse_click" then
+            local mx,my=p2,p3
+            if my==1 and mx>=W-2 then return end
+            if my==H-1 and mx<=8 then return end
+            local idx=my-1+scroll
+            local f=flips[idx]
+            if f then
+                local pot2=f.wager*2
+                local houseCut2=math.max(1,math.floor(pot2*0.10))
+                local prize2=pot2-houseCut2
+                W,H=term.getSize()
+                term.setBackgroundColor(colors.black) term.clear()
+                term.setBackgroundColor(colors.pink) term.setTextColor(colors.black)
+                term.setCursorPos(1,1) term.clearLine() term.write(" Join Coinflip #"..f.id)
+                term.setBackgroundColor(colors.black)
+                term.setCursorPos(2,3) term.setTextColor(colors.gray)   term.write("By: "..f.creator)
+                term.setCursorPos(2,4) term.setTextColor(colors.white)  term.write("Wager:  "..f.wager.." sp each")
+                term.setCursorPos(2,5) term.setTextColor(colors.lime)   term.write("Winner: ~"..prize2.." sp")
+                term.setCursorPos(2,6) term.setTextColor(colors.orange) term.write("House:  "..houseCut2.." sp")
+                term.setCursorPos(1,H-1) term.setBackgroundColor(colors.black) term.clearLine()
+                term.setBackgroundColor(colors.white) term.setTextColor(colors.black) term.write(" Flip! ")
+                term.setBackgroundColor(colors.black) term.write("  ")
+                term.setBackgroundColor(colors.red) term.setTextColor(colors.white) term.write(" Back ")
+                term.setCursorPos(1,H) term.setBackgroundColor(colors.black) term.write(string.rep(" ",W))
+                local confirmed=false
+                while true do
+                    local bev,bp1,bp2,bp3=os.pullEvent()
+                    if bev=="mouse_click" then
+                        if bp3==1 and bp2>=W-2 then break end
+                        if bp3==H-1 then
+                            if bp2>=1 and bp2<=7 then confirmed=true break
+                            elseif bp2>=10 then break end
+                        end
+                    elseif bev=="key" and bp1==keys.q then break end
+                end
+                if confirmed then
+                    local r=rpc({type="coinflip_join",token=token,flip_id=f.id},15)
+                    -- Coin flip animation (result already known, just looks good)
+                    W,H=term.getSize()
+                    term.setBackgroundColor(colors.black) term.clear()
+                    term.setBackgroundColor(colors.pink) term.setTextColor(colors.black)
+                    term.setCursorPos(1,1) term.clearLine() term.write(" Flipping...")
+                    term.setBackgroundColor(colors.black)
+                    local sides={"( HEADS )","( TAILS )"}
+                    local delays={0.07,0.07,0.09,0.11,0.14,0.18,0.24,0.32}
+                    local cy=math.floor(H/2)
+                    for i,d in ipairs(delays) do
+                        term.setCursorPos(1,cy) term.clearLine()
+                        local s=sides[(i%2)+1]
+                        term.setTextColor(i%2==0 and colors.yellow or colors.cyan)
+                        term.setCursorPos(math.max(1,math.floor((W-#s)/2)+1),cy) term.write(s)
+                        sleep(d)
+                    end
+                    sleep(0.25)
+                    -- Result
+                    term.setBackgroundColor(colors.black) term.clear()
+                    term.setBackgroundColor(colors.pink) term.setTextColor(colors.black)
+                    term.setCursorPos(1,1) term.clearLine() term.write(" Result")
+                    term.setBackgroundColor(colors.black)
+                    if r and r.ok then
+                        if r.you_won then
+                            local wt="YOU WIN!"
+                            term.setCursorPos(math.max(1,math.floor((W-#wt)/2)+1),cy-1)
+                            term.setTextColor(colors.yellow) term.write(wt)
+                            term.setCursorPos(2,cy+1) term.setTextColor(colors.lime)
+                            term.write("+"..r.prize.." sp")
+                            term.setCursorPos(2,cy+2) term.setTextColor(colors.gray)
+                            term.write("Balance: "..r.new_balance.." sp")
+                        else
+                            local lt="YOU LOSE"
+                            term.setCursorPos(math.max(1,math.floor((W-#lt)/2)+1),cy-1)
+                            term.setTextColor(colors.red) term.write(lt)
+                            term.setCursorPos(2,cy+1) term.setTextColor(colors.orange)
+                            term.write(r.winner.." won "..r.prize.." sp")
+                            term.setCursorPos(2,cy+2) term.setTextColor(colors.gray)
+                            term.write("Balance: "..r.new_balance.." sp")
+                        end
+                    else
+                        term.setCursorPos(2,5) term.setTextColor(colors.red)
+                        term.write((r and r.err) or "Failed")
+                    end
+                    term.setCursorPos(2,H-1) term.setTextColor(colors.gray) term.write("Press any key...")
+                    os.pullEvent() needFetch=true
+                end
+            end
+        elseif ev=="mouse_scroll" then
+            scroll=math.max(0,math.min(scroll+p1,math.max(0,#flips-listH)))
+        elseif ev=="key" then
+            if p1==keys.q then return
+            elseif p1==keys.r then needFetch=true end
+        end
+    end
+end
+
+local function myBets()
+    local bets={} local scroll=0 local needFetch=true
+    while true do
+        if needFetch then
+            local r=rpc({type="coinflip_my_bets",token=token},8)
+            bets=(r and r.bets) or {}
+            scroll=0 needFetch=false
+        end
+        W,H=term.getSize()
+        local listH=H-3
+        term.setBackgroundColor(colors.black) term.clear()
+        term.setBackgroundColor(colors.yellow) term.setTextColor(colors.black)
+        term.setCursorPos(1,1) term.clearLine()
+        term.write(" My Active Bets ["..#bets.."]"..string.rep(" ",math.max(0,W-21)).."[X]")
+        for row=1,listH do
+            local f=bets[row+scroll]
+            term.setCursorPos(1,row+1) term.setBackgroundColor(colors.black)
+            if f then
+                term.setTextColor(colors.yellow) term.write(("#"..f.id.."  "):sub(1,5))
+                term.setTextColor(colors.white)  term.write((f.wager.."sp  waiting for player..."):sub(1,W-5))
+            else term.write(string.rep(" ",W)) end
+        end
+        if scroll>0 then term.setCursorPos(W,2) term.setBackgroundColor(colors.gray) term.setTextColor(colors.white) term.write("^") end
+        if scroll+listH<#bets then term.setCursorPos(W,H-1) term.setBackgroundColor(colors.gray) term.setTextColor(colors.white) term.write("v") end
+        term.setCursorPos(1,H-1) term.setBackgroundColor(colors.black) term.clearLine()
+        term.setBackgroundColor(colors.orange) term.write(" < Back ")
+        term.setBackgroundColor(colors.black) term.setTextColor(colors.gray) term.write("  Click bet to cancel it")
+        term.setCursorPos(1,H) term.setBackgroundColor(colors.black) term.write(string.rep(" ",W))
+        local ev,p1,p2,p3=os.pullEvent()
+        if ev=="term_resize" then W,H=term.getSize()
+        elseif ev=="mouse_click" then
+            local mx,my=p2,p3
+            if my==1 and mx>=W-2 then return end
+            if my==H-1 and mx<=8 then return end
+            local idx=my-1+scroll
+            local f=bets[idx]
+            if f then
+                local r=rpc({type="coinflip_cancel",token=token,flip_id=f.id},10)
+                term.setBackgroundColor(colors.black) term.clear()
+                term.setCursorPos(1,3)
+                if r and r.ok then
+                    term.setTextColor(colors.lime) term.write("Bet cancelled!")
+                    term.setCursorPos(1,4) term.setTextColor(colors.gray) term.write("Returned "..r.returned.." sp to balance")
+                else
+                    term.setTextColor(colors.red) term.write((r and r.err) or "Failed")
+                end
+                term.setCursorPos(1,6) term.setTextColor(colors.gray) term.write("Press any key...")
+                os.pullEvent() needFetch=true
+            end
+        elseif ev=="mouse_scroll" then
+            scroll=math.max(0,math.min(scroll+p1,math.max(0,#bets-listH)))
+        elseif ev=="key" and p1==keys.q then return end
+    end
+end
+
+local function gamblingMenu()
+    local menuItems={
+        {label="Create Coinflip",icon=colors.green },
+        {label="Open Coinflips", icon=colors.cyan  },
+        {label="My Active Bets", icon=colors.yellow},
+        {label="Back",           icon=colors.gray  },
+    }
+    while true do
+        local sel=clickMenu("Gambling",menuItems)
+        if sel==nil or sel==4 then return
+        elseif sel==1 then createCoinflip()
+        elseif sel==2 then openCoinflips()
+        elseif sel==3 then myBets()
+        end
+    end
+end
+
 -- Market hub
 local function marketMenu()
     local menuItems={
@@ -1619,14 +1882,16 @@ local function userMenu()
         {label="Cloud Storage", icon=colors.cyan  },
         {label="Bank",          icon=colors.yellow},
         {label="Market",        icon=colors.orange},
+        {label="Gambling",      icon=colors.pink  },
         {label="Logout",        icon=colors.red   },
     }
     while true do
         local sel=clickMenu("Cloud - "..username, menuItems)
-        if sel==nil or sel==4 then token=nil username=nil isAdmin=false return
+        if sel==nil or sel==5 then token=nil username=nil isAdmin=false return
         elseif sel==1 then cloudStorageMenu()
         elseif sel==2 then bankMenu()
         elseif sel==3 then marketMenu()
+        elseif sel==4 then gamblingMenu()
         end
     end
 end
