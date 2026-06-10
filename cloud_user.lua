@@ -1227,7 +1227,7 @@ local function marketBrowse()
                 term.setTextColor(oos and colors.red or colors.lime) term.write(sc)
                 -- Row B: lot + price
                 term.setCursorPos(1,yb)
-                term.setTextColor(colors.gray) term.write("  x"..l.lot_size.." · "..l.price.."sp")
+                term.setTextColor(colors.gray) term.write("  x"..l.lot_size.." for "..l.price.."sp")
             end
         end
         if scroll>0 then term.setCursorPos(W,LIST_TOP) term.setBackgroundColor(colors.gray) term.setTextColor(colors.white) term.write("^") end
