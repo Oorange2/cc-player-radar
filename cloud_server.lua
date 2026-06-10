@@ -892,6 +892,7 @@ local function handle(cid, msg)
             bank_balance   = vspurs - tdep,
             daily_loan_int = daily_loan_int,
             daily_dep_int  = daily_dep_int,
+            market_revenue = bankData.market_revenue or 0,
         }, PROTOCOL)
     end
 end
