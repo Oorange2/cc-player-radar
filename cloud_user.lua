@@ -20,10 +20,11 @@ local DENOMS = {
     {name="numismatics:spur",     label="Spur",     value=1},
 }
 
-local serverId = nil
-local token    = nil
-local username = nil
-local isAdmin  = false
+local serverId     = nil
+local token        = nil
+local username     = nil
+local isAdmin      = false
+local unreadNotifs = 0
 
 local iconColors = {
     colors.orange, colors.magenta, colors.lightBlue, colors.yellow,
@@ -57,7 +58,9 @@ local function doLogin()
         local pass = read("*")
         local res = rpc({ type="login", username=uname, password=pass })
         if res and res.ok then
-            token=res.token username=uname isAdmin=res.isAdmin or false return
+            token=res.token username=uname isAdmin=res.isAdmin or false
+            unreadNotifs = res.unread_notifs or 0
+            return
         else
             term.setCursorPos(1,6) term.setTextColor(colors.red)
             term.write((res and res.err) or "Server not found")
@@ -1974,9 +1977,8 @@ end
 
 -- User menu
 local function userMenu()
-    -- Fetch unread count once on login so the notification tab can flash
-    local ncRes = rpc({type="get_notif_count", token=token}, 3)
-    local unreadCount = (ncRes and ncRes.count) or 0
+    -- unreadNotifs is set at login — no extra RPC needed here
+    local unreadCount = unreadNotifs
 
     while true do
         local hasUnread = unreadCount > 0
@@ -1997,7 +1999,8 @@ local function userMenu()
         elseif sel==4 then gamblingMenu()
         elseif sel==5 then
             notificationsScreen()
-            unreadCount = 0  -- all read now
+            unreadCount = 0
+            unreadNotifs = 0
         end
     end
 end
