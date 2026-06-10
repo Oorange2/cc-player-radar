@@ -189,7 +189,12 @@ local function getBankAcc(uname)
     if not bankData.accounts[uname] then
         bankData.accounts[uname] = { balance=0, dep_ts=os.epoch("utc"), loan=nil, credit=500, blog={} }
     end
-    return bankData.accounts[uname]
+    local b = bankData.accounts[uname]
+    if b.credit       == nil then b.credit   = 500            end
+    if b.dep_ts       == nil then b.dep_ts   = os.epoch("utc") end
+    if b.blog         == nil then b.blog         = {}          end
+    if b.notifications== nil then b.notifications= {}          end
+    return b
 end
 
 local function addBankLog(uname, event)
