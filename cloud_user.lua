@@ -378,12 +378,14 @@ end
 
 -- ── Banking UI ───────────────────────────────────────────────────────────────
 local function creditColor(s)
+    s = s or 0
     if s >= 700 then return colors.lime
     elseif s >= 500 then return colors.yellow
     elseif s >= 300 then return colors.orange
     else return colors.red end
 end
 local function creditLabel(s)
+    s = s or 0
     if s >= 800 then return "Excellent"
     elseif s >= 700 then return "Very Good"
     elseif s >= 600 then return "Good"
